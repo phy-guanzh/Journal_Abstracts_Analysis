@@ -1,0 +1,12 @@
+name: Top100_Key_Words_Dashboard
+title: Top100_Key_Words_Dashboard
+username: yhj0vi-zhe-guan
+account: yhj0vi-zhe-guan
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13593328
+bundleId: 9516694
+url: https://yhj0vi-zhe-guan.shinyapps.io/Top100_Key_Words_Dashboard/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

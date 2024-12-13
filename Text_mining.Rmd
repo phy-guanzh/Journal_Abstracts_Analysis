@@ -1,0 +1,94 @@
+---
+title: "My Dashboard"
+output: flexdashboard::flex_dashboard
+runtime: shiny
+---
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidytext)
+library(wordcloud2)
+library(textstem)
+```
+```{r}
+journal_data <- read.csv("./journal_data.csv")
+journal_data <- tibble(journal_data)
+journal_data <- journal_data %>%
+                mutate(row_id = row_number())
+journal_data$title_abstract <- paste0(journal_data$title," - ",journal_data$abstract)
+journal_data <- journal_data %>% mutate(title_abstract = lemmatize_strings(title_abstract))
+journal_token <- journal_data %>% select(row_id,title_abstract) %>% unnest_tokens(output = word, title_abstract, token = "words")
+```
+```{r}
+journal_token <- journal_token %>% rename(index_paper = row_id)
+data("stop_words")
+journal_token_cleaned <- journal_token %>% anti_join(stop_words, by = c("word" = "word"))
+journal_token_cleaned <- journal_token_cleaned %>% filter(!grepl("\\b\\d+\\b", word))
+top_100_words_journal <- slice_head(journal_token_cleaned %>% count(word) %>% arrange(desc(n)), n = 100) 
+```
+
+```{r}
+library(shiny)
+library(wordcloud2)
+library(dplyr)
+
+ui <- fluidPage(
+  titlePanel("Journal Key Words Dashboard"),
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("word_count", "Number of Words", 
+                  min = 1, 
+                  max = nrow(top_100_words_journal),
+                  step = 1,
+                  value = min(10, nrow(top_100_words_journal))),
+      selectInput("color", "Color Scheme", 
+                  choices = c("random-light", "random-dark"), 
+                  selected = "random-light"),
+      sliderInput("size", "Word Cloud Size", 
+                  min = 0.5, max = 2, value = 1),
+      selectInput("shape", "Word Cloud Shape", 
+                  choices = c("circle", "cardioid", "diamond", "star", "triangle", "pentagon"), 
+                  selected = "circle"),
+      sliderInput("grid", "Word Spacing", 
+                  min = 0, max = 20, value = 5),
+      sliderInput("rotate", "Rotation Ratio", 
+                  min = 0, max = 1, value = 0.5)
+    ),
+    mainPanel(
+      # 设置图片大小
+      tags$style(
+        type = "text/css",
+        "#wordcloud_plot {height: 600px !important; width: 1000px !important;}"
+      ),
+      wordcloud2Output("wordcloud_plot")
+    )
+  )
+)
+
+server <- function(input, output) {
+  output$wordcloud_plot <- renderWordcloud2({
+    filtered_words <- top_100_words_journal %>%
+      select(word, n) %>%
+      slice_head(n = input$word_count)
+    
+    wordcloud2(
+      data = filtered_words, 
+      size = input$size, 
+      color = input$color, 
+      backgroundColor = "black", 
+      shape = input$shape,
+      gridSize = input$grid,
+      rotateRatio = input$rotate
+    )
+  })
+}
+
+shinyApp(ui = ui, server = server)
+
+
+```
+
+
+
+
