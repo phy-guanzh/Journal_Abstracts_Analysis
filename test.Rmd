@@ -1,0 +1,52 @@
+---
+title: "Untitled"
+author: "Zhe GUAN"
+date: "2024-12-13"
+output: html_document
+---
+
+```{r}
+library(tidyr)
+library(dplyr)
+journal_data <- read.csv("/Users/zheguan/CWR_fig/journal_data.csv")
+journal_data %>% head()
+```
+```{r}
+journal_data %>% summary()
+```
+```{r}
+journal_data %>% summarise(across(everything(), n_distinct))
+```
+
+```{r}
+library(tidytext)
+journal_data <- tibble(journal_data)
+journal_data <- journal_data %>%
+                mutate(row_id = row_number())
+journal_data$title_abstract <- paste0(journal_data$title,"-",journal_data$abstract)
+journal_token <- journal_data %>% select(row_id,title_abstract) %>% unnest_tokens(output = word, title_abstract, token = "words")
+```
+```{r}
+journal_token <- journal_token %>% rename(index_paper = row_id)
+journal_token %>% count(word) %>% arrange(desc(n))
+```
+```{r}
+data("stop_words")
+journal_token_cleaned <- journal_token %>% anti_join(stop_words, by = c("word" = "word"))
+journal_token_cleaned %>% count(word) %>% arrange(desc(n))
+```
+```{r}
+journal_token_cleaned <- journal_token_cleaned %>% filter(!grepl("\\b\\d+\\b", word))
+top_50_words_journal <- slice_head(journal_token_cleaned %>% count(index_paper, word) %>% arrange(desc(n)), n = 50) 
+top_50_words_journal
+
+```
+
+```{r}
+library(wordcloud2)
+
+wordcloud2(data = top_50_words_journal, size = 1)
+
+top_50_words_journal
+```
+
