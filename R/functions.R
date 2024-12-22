@@ -5,6 +5,7 @@ library(wordcloud2)
 library(textstem)
 library(ggplot2)
 library(ggrepel)
+library(topicmodels)
 
 cleaning_plot_Uni <- function(journal_token, year) {
       #cleaning
@@ -159,3 +160,40 @@ tfidf_plot_Uni <- function(journal_token, year){
 }
 
 
+
+LDA_analysis <- function(groups, journal_data, k_values){
+
+  for (group in groups) {
+    
+    journal_token <- journal_data %>% 
+      filter(year %in% group) %>%
+      select(row_id,title_abstract) %>%
+      unnest_tokens(output = word, title_abstract, token = "words") %>%  
+      anti_join(stop_words, by = c("word" = "word"))   %>% 
+      filter(!grepl("\\b\\d+\\b", word)) 
+    
+    print(journal_token)
+    # 构建文档-词矩阵（DTM）
+    dtm <- journal_token %>%
+      count(row_id, word) %>%
+      cast_dtm(document = row_id, term = word, value = n)
+    
+    # 针对每个 k 值循环
+    for (k in k_values) {
+      # 训练 LDA 模型
+      lda_model <- LDA(dtm, k = k, method = "Gibbs", control = list(seed = 42))
+      
+      # 计算困惑度
+      perplexity_score <- perplexity(lda_model, dtm)
+      
+      # 保存结果
+      lda_evaluation[[paste0("Group_", paste(group, collapse = "_"), "_K_", k)]] <- list(
+        group = group,
+        k = k,
+        model = lda_model,
+        perplexity = perplexity_score
+      )
+    }
+  }
+  return(lda_evaluation)
+}
