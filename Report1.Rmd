@@ -1,0 +1,718 @@
+---
+title: "report"
+author: "Zhe GUAN"
+date: "2024-12-18"
+output: html_document
+---
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidytext)
+library(wordcloud2)
+library(textstem)
+library(ggplot2)
+library(ggpubr)
+library(topicmodels)
+```
+
+```{r}
+dark_blue <- c("#1f77b4")
+orange <- c("#ff7f0e")
+red <- c("#F26666")
+bright_red <- c("#FF4500")
+violet <- c("#EE82EE")
+yellow <- c("#FFDF00")
+gray <- c('#778899')
+violet2 <- c("#DE3163")
+green <- c('#2ca02c')
+blue <- c('#17becf')
+```
+
+```{r}
+#read data
+journal_data <- read.csv("./journal_data.csv")
+journal_data <- tibble(journal_data)
+journal_data <- journal_data %>%
+  mutate(row_id = row_number())
+
+#prepare a column with title-abstract and do lemmatization
+journal_data$title_abstract <- paste0(journal_data$title," - ",journal_data$abstract)
+journal_data <- journal_data %>% mutate(title_abstract = lemmatize_strings(title_abstract))
+
+#prepare bag of words
+journal_token <- journal_data %>% select(row_id,title_abstract) %>% unnest_tokens(output = word, title_abstract, token = "words")
+
+journal_token <- journal_data %>% filter(year == 2000) %>% select(row_id,title_abstract) %>% unnest_tokens(output = word, title_abstract, token = "words")
+
+#data cleaning such as removing stop words and digital numbers
+journal_token <- journal_token %>% rename(index_paper = row_id)
+data("stop_words")
+journal_token_cleaned <- journal_token %>% anti_join(stop_words, by = c("word" = "word"))
+journal_token_cleaned <- journal_token_cleaned %>% filter(!grepl("\\b\\d+\\b", word))
+top_100_words_journal <- slice_head(journal_token_cleaned %>% count(word) %>% arrange(desc(n)), n = 100) 
+```
+
+
+```{r}
+unique_years <- journal_data %>% distinct(year) %>% arrange(year)
+group1 <- unique_years$year[1:7] 
+group2 <- unique_years$year[8:13]  
+group3 <- unique_years$year[14:18]
+group4 <- unique_years$year[19:nrow(unique_years)]
+
+groups <- list(group1,group2,group3,group4)
+```
+
+```{r}
+source("R/functions.R")
+
+plots_list <- lapply(groups, function(y) {
+
+  journal_token <- journal_data %>%
+    filter(year %in% y) %>%
+    select(row_id, title_abstract) %>%
+    unnest_tokens(output = word, title_abstract, token = "words")
+  
+  cleaning_plot_Uni(journal_token, y)
+})
+
+final_plot <- ggarrange(
+  plotlist = plots_list,
+  ncol = 2,
+  nrow = 2
+)
+
+print(final_plot)
+```
+
+```{r}
+unique_journal <- journal_data %>% distinct(journal) %>% pull(journal)
+
+unique_journal
+```
+```{r}
+source("R/functions.R")
+plots_list_journal <- lapply(unique_journal,function(y){
+    journal_token <- journal_data %>%
+    filter(journal == y) %>%
+    select(row_id, title_abstract) %>%
+    unnest_tokens(output = word, title_abstract, token = "words")
+  
+    cleaning_plot_Uni(journal_token, y)
+})
+
+final_plot_journals <- ggarrange(plotlist = plots_list_journal,
+          nrow = 2,
+          ncol = 2)
+
+print(final_plot_journals)
+```
+
+
+```{r}
+top_100_words_journal
+ggplot(data=top_100_words_journal  %>% slice_head(n = 20) ,
+       aes(x=reorder(word, -n), y=n)) +
+  geom_bar(stat="identity", color = dark_blue, fill = blue) +
+  theme_minimal()+
+  labs(
+    title = "Top 20 Frequency Unigrams from 2000 to 2022",
+    x = "",
+    y = "Frequency"
+  )+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),  
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.line = element_line(arrow = arrow(length = unit(0.3, "cm"), type = "closed"))
+  )
+```
+
+```{r}
+source("R/functions.R")
+plots_list_bi <- lapply(groups, function(y){
+  
+    journal_token_bi <- journal_data %>%
+    filter(year %in% y) %>% 
+      select(row_id,title_abstract) %>% 
+      unnest_tokens(output = bigrams, title_abstract, token = "ngrams", n = 2)
+  
+  cleaning_plot_Bi(journal_token_bi, y)
+})
+
+
+
+final_plot_bi <- ggarrange(plotlist = plots_list_bi,
+          nrow = 2,
+          ncol = 2)
+
+print(final_plot_bi)
+
+```
+
+
+```{r}
+source("R/functions.R")
+plots_list_bi_journal <- lapply(unique_journal, function(y){
+  
+    journal_token_bi <- journal_data %>%
+    filter(journal == y) %>% 
+      select(row_id,title_abstract) %>% 
+      unnest_tokens(output = bigrams, title_abstract, token = "ngrams", n = 2)
+  
+  cleaning_plot_Bi(journal_token_bi, y)
+})
+
+
+
+final_plot_bi_journal <- ggarrange(plotlist = plots_list_bi_journal,
+          nrow = 2,
+          ncol = 2)
+
+print(final_plot_bi_journal)
+
+```
+
+
+
+```{r}
+ggsave(filename = "Plots/top10hist_plot_uni.png", plot = final_plot , width = 10, height = 10, dpi = 300)
+ggsave(filename = "Plots/top10hist_plot_uni_journal.png", plot = final_plot_journals, width = 10, height = 10, dpi = 300)
+ggsave(filename = "Plots/top10hist_plot_bi.png", plot = final_plot_bi, width = 10, height = 10, dpi = 300)
+ggsave(filename = "Plots/top10hist_plot_bi_journal.png", plot = final_plot_bi, width = 10, height = 10, dpi = 300)
+
+```
+
+```{r}
+journal_token_bi <- journal_data %>% select(row_id,title_abstract) %>% unnest_tokens(output = bigrams, title_abstract, token = "ngrams", n = 2)
+journal_token_bi <- journal_token_bi %>% rename(index_paper = row_id)
+data("stop_words")
+journal_token_bi_cleaned <- journal_token_bi %>% filter(!grepl("\\b\\d+\\b", bigrams))
+bigrams_separated <- journal_token_bi_cleaned %>% separate(bigrams, into = c("word1", "word2"), sep = " ")
+bigrams_separated_remove_stop <- bigrams_separated %>% filter(!(word1 %in% stop_words$word) & !(word2 %in% stop_words$word)) %>% unite(bigrams, word1, word2, sep = " ")
+bigrams_separated_cleaned <- bigrams_separated_remove_stop  %>% count(bigrams) %>% arrange(desc(n))
+
+bigrams_separated_cleaned
+
+```
+
+```{r}
+#plot
+ggplot(data=bigrams_separated_cleaned  %>% slice_head(n = 20) ,
+       aes(x=reorder(bigrams, -n), y=n)) +
+  geom_bar(stat="identity", color = red, fill = bright_red) +
+  theme_minimal()+
+  labs(
+    title = "Top 20 Frequency Bigrams",
+    x = "",
+    y = "Frequency"
+  )+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),  
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.line = element_line(arrow = arrow(length = unit(0.3, "cm"), type = "closed"))
+  )
+
+```
+
+
+```{r}
+source("R/functions.R")
+plots_list_tfidf <- lapply(groups, function(y){
+  journal_token <- journal_data %>% 
+    filter(year %in% y) %>%
+    select(row_id,title_abstract) %>%
+    unnest_tokens(output = word, title_abstract, token = "words")
+  
+  tfidf_plot_Uni(journal_token, y)
+})
+
+plots_list_tfidf_uni <- ggarrange(plotlist = plots_list_tfidf,
+          nrow = 1,
+          ncol = 2)
+
+print(plots_list_tfidf_uni)
+
+```
+```{r}
+for (i in seq_along(plots_list_tfidf)) {
+  ggsave(
+    filename = paste0("Plots/toptfidf_uni_", i, ".png"),
+    plot = plots_list_tfidf[[i]],
+    width = 10,  
+    height = 10,
+    dpi = 300,
+    limitsize = FALSE
+  )
+}
+```
+
+
+```{r}
+source("R/functions.R")
+plots_list_tfidf_journal <- lapply(unique_journal, function(y){
+  journal_token <- journal_data %>% 
+    filter(journal == y) %>%
+    select(row_id,title_abstract) %>%
+    unnest_tokens(output = word, title_abstract, token = "words")
+  
+  tfidf_plot_Uni(journal_token, y)
+})
+
+plots_list_tfidf_uni_journal <- ggarrange(plotlist = plots_list_tfidf_journal,
+          nrow = 1,
+          ncol = 1)
+
+print(plots_list_tfidf_uni_journal)
+
+```
+
+```{r}
+for (i in seq_along(plots_list_tfidf_uni_journal)) {
+  ggsave(
+    filename = paste0("Plots/toptfidf_uni_journal_", i, ".png"),
+    plot = plots_list_tfidf_uni_journal[[i]],
+    width = 10,  # 单个图的宽度
+    height = 10, # 单个图的高度
+    dpi = 300,
+    limitsize = FALSE
+  )
+}
+```
+
+```{r}
+source("R/functions.R")
+plots_list_tfidf_bi <- lapply(groups, function(y){
+  journal_token_bi <- journal_data %>% 
+    filter(year %in% y) %>%
+    select(row_id,title_abstract) %>%
+    unnest_tokens(output = bigrams, title_abstract, token = "ngrams", n = 2)
+  
+  tfidf_plot_Bi(journal_token_bi, y)
+})
+
+ ggarrange(plotlist = plots_list_tfidf_bi,
+          nrow = 1,
+          ncol = 2)
+
+```
+
+
+```{r}
+for (i in seq_along(plots_list_tfidf_bi)) {
+  ggsave(
+    filename = paste0("Plots/toptfidf_bi_", i, ".png"),
+    plot = plots_list_tfidf_bi[[i]],
+    width = 10,  
+    height = 10, 
+    dpi = 300,
+    limitsize = FALSE
+  )
+}
+```
+
+
+
+```{r}
+source("R/functions.R")
+plots_list_tfidf_bi_journal <- lapply(unique_journal, function(y){
+  journal_token_bi <- journal_data %>% 
+    filter(journal == y) %>% 
+    select(row_id,title_abstract) %>%
+    unnest_tokens(output = bigrams, title_abstract, token = "ngrams", n = 2)
+  
+  tfidf_plot_Bi(journal_token_bi, y)
+})
+
+ggarrange(plotlist = plots_list_tfidf_bi_journal,
+          nrow = 1,
+          ncol = 1)
+
+```
+
+```{r}
+for (i in seq_along(plots_list_tfidf_bi_journal)) {
+  ggsave(
+    filename = paste0("Plots/toptfidf_bi_journal_", i, ".png"),
+    plot = plots_list_tfidf_bi_journal[[i]],
+    width = 10,  
+    height = 10, 
+    dpi = 300,
+    limitsize = FALSE
+  )
+}
+```
+
+
+
+
+
+```{r}
+#dashboard for bigrams
+top_100_bigrams_journal <- bigrams_separated_cleaned
+source("R/Vis_dashboard.R", echo = TRUE)
+```
+
+
+
+```{r}
+bigrams_separated_remove_stop
+bigrams_tfidf <- bigrams_separated_remove_stop %>%
+  count(index_paper, bigrams) %>%        
+  bind_tf_idf(bigrams, index_paper, n) %>%  
+  arrange(desc(tf_idf))                
+```
+
+```{r}
+ggplot(data=bigrams_tfidf %>% arrange(desc(tf_idf))  %>% slice_head(n = 20) ,
+       aes(x=reorder(bigrams, -tf_idf), y=tf_idf)) +
+  geom_bar(stat="identity", color = violet, fill = violet) +
+  theme_minimal()+
+  labs(
+    title = "Top 20 Tf-Idf Bigrams terms",
+    x = "",
+    y = "tf-idf values"
+  )+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),  
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.line = element_line(arrow = arrow(length = unit(0.3, "cm"), type = "closed"))
+  )
+```
+
+# use words of bag to do LDA analysis
+```{r}
+source("R/functions.R")
+
+k_values <- c(2, 4, 6, 8 ,10, 13, 15, 20, 25)
+
+lda_evaluation <- list()
+
+lda_evaluation <- LDA_analysis(groups, journal_data, k_values)
+
+
+```
+```{r}
+results <- tibble(
+  group = unlist(lapply(lda_evaluation, function(x) paste(x$group, collapse = "_"))),
+  k = unlist(lapply(lda_evaluation, function(x) x$k)),
+  perplexity = unlist(lapply(lda_evaluation, function(x) x$perplexity))
+)
+
+results <- results %>%
+  mutate(year_groups = case_when(
+    group == "2000_2001_2002_2003_2004" ~ "2000-2004",
+    group == "2005_2006_2007_2008_2009" ~ "2005-2009",
+    group == "2010_2011_2012_2013_2014" ~ "2010-2014",
+    group == "2015_2016_2017_2018_2019_2020_2021_2022" ~ "2015-2022"
+  ))
+
+
+ggplot(results, aes(x = k, y = perplexity, color = year_groups)) +
+  geom_line() +
+  labs(title = "Perplexity for Different K Values",
+       x = "Number of Topics (K)",
+       y = "Perplexity",
+       color = "Year Group") +
+  theme_minimal() +
+  theme(axis.title = )+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),  
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(hjust = 1),
+    axis.line = element_line(arrow = arrow(length = unit(0.3, "cm"), type = "closed"))
+  )
+
+```
+
+#we can find the perplexity increasing when year increasing
+
+```{r}
+
+source("R/LDA.R")
+lda_model_2000_2004_k6 <- get_lda_model("2000_2001_2002_2003_2004", 6, lda_evaluation)
+lda_model_2015_2022_k13 <- get_lda_model("2015_2016_2017_2018_2019_2020_2021_2022", 13, lda_evaluation)
+
+lda_model_2000_2004_k6
+lda_model_2015_2022_k13
+```
+
+```{r}
+source("R/LDA.R")
+plot_topic_terms(lda_model_2000_2004_k6, "2000-2004", 6)
+```
+
+```{r}
+source("R/LDA_Bi.R")
+
+k_values <- c(2, 4, 6, 8 ,10, 13, 15, 20, 25)
+
+lda_evaluation <- list()
+
+lda_evaluation <- LDA_analysis_bi(groups, journal_data, k_values)
+```
+
+```{r}
+results <- tibble(
+  group = unlist(lapply(lda_evaluation, function(x) paste(x$group, collapse = "_"))),
+  k = unlist(lapply(lda_evaluation, function(x) x$k)),
+  perplexity = unlist(lapply(lda_evaluation, function(x) x$perplexity))
+)
+
+results <- results %>%
+  mutate(year_groups = case_when(
+    group == "2000_2001_2002_2003_2004" ~ "2000-2004",
+    group == "2005_2006_2007_2008_2009" ~ "2005-2009",
+    group == "2010_2011_2012_2013_2014" ~ "2010-2014",
+    group == "2015_2016_2017_2018_2019_2020_2021_2022" ~ "2015-2022"
+  ))
+
+
+ggplot(results, aes(x = k, y = perplexity, color = year_groups)) +
+  geom_line() +
+  labs(title = "Perplexity for Different K Values",
+       x = "Number of Topics (K)",
+       y = "Perplexity",
+       color = "Year Group") +
+  theme_minimal() +
+  theme(axis.title = )+
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15),  
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    panel.grid = element_blank(),
+    axis.text.x = element_text(hjust = 1),
+    axis.line = element_line(arrow = arrow(length = unit(0.3, "cm"), type = "closed"))
+  )
+```
+
+```{r}
+source("R/LDA.R")
+lda_model_2000_2004_k6 <- get_lda_model("2000_2001_2002_2003_2004", 6, lda_evaluation)
+lda_model_2015_2022_k13 <- get_lda_model("2015_2016_2017_2018_2019_2020_2021_2022", 13, lda_evaluation)
+
+plot_topic_terms(lda_model_2000_2004_k6, "2000-2004", 6)
+```
+```{r}
+source("R/LDA.R")
+p <- plot_topic_terms(lda_model_2015_2022_k13, "2015-2022", 13)
+print(p)
+```
+```{r}
+ggsave(filename = "Plots/lda_model_2015_2022_k13.png",plot = p,width = 20, height = 20, dpi = 500)
+```
+
+```{r}
+journal_token <- journal_data  %>%
+  select(row_id, title_abstract, year, journal) %>%  
+  unnest_tokens(output = word, input = title_abstract, token = "words") %>%  
+  anti_join(stop_words, by = c("word" = "word")) %>%  
+  filter(!grepl("\\b\\d+\\b", word))  
+
+dtm <- journal_token %>%
+  count(row_id, word) %>%  
+  cast_dtm(document = row_id, term = word, value = n) 
+
+meta_data <- journal_data %>%
+  distinct(row_id, year, journal) 
+
+documents <- journal_token %>%
+  group_by(row_id) %>%
+  summarise(text = paste(word, collapse = " "))
+
+stopifnot(nrow(documents) == nrow(meta_data))
+```
+```{r}
+processed$vocab
+```
+
+```{r}
+
+library(stm)
+
+
+processed <- textProcessor(
+  documents = documents$text,
+  metadata = meta_data,
+  customstopwords = stop_words$word
+)
+
+prep <- prepDocuments(
+  processed$documents,
+  processed$vocab,
+  processed$meta
+)
+
+docs <- prep$documents
+vocab <- prep$vocab
+meta <- prep$meta
+
+
+dtm_model <- stm(
+  documents = docs,
+  vocab = vocab,
+  K = 6,  
+  prevalence = ~ year + journal ,  
+  data = meta,
+  max.em.its = 75,
+  seed = 1234
+)
+
+```
+```{r}
+
+labelTopics(dtm_model)
+
+```
+```{r}
+
+effect_data <- data.frame()
+
+
+for (topic in 1:6) {
+  plot_data <- plot(
+    time_effect,
+    covariate = "year",
+    method = "continuous",
+    topics = topic,
+    print = FALSE
+  )
+  
+
+  topic_data <- data.frame(
+    year = plot_data$x,
+    topic = paste0("Topic ", topic),
+    estimate = plot_data$means[[1]],
+    lower = plot_data$ci[[1]]["2.5%", ],
+    upper = plot_data$ci[[1]]["97.5%", ]
+  )
+  effect_data <- rbind(effect_data, topic_data)
+}
+
+
+print(effect_data)
+
+
+p <- ggplot(effect_data, aes(x = year, y = estimate, color = topic, group = topic)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = topic), alpha = 0.2) +
+  labs(
+    title = "Topic Trends Over Time",
+    x = "Year",
+    y = "Estimated Topic Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12)
+  )
+
+print(p)
+```
+
+```{r}
+ggsave(filename = "Plots/trend_time.png",plot = p,width = 20, height = 20, dpi = 500)
+```
+
+```{r}
+journal_effect <- estimateEffect(
+  formula = c(1:6) ~ journal,  
+  stmobj = dtm_model,
+  metadata = meta,
+  uncertainty = "Global"
+)
+
+journal_data <- data.frame()
+journal_data
+
+for (topic in 1:6) {
+
+  plot_data <- plot(
+    journal_effect,
+    covariate = "journal",
+    method = "pointestimate",
+    topics = topic,
+    print = FALSE
+  )
+  
+
+  if (!is.null(plot_data$uvals)) {
+
+    topic_data <- data.frame(
+      journal = plot_data$uvals,  
+      topic = paste0("Topic ", topic),  
+      estimate = plot_data$means[[1]], 
+      lower = plot_data$ci[[1]]["2.5%", ], 
+      upper = plot_data$ci[[1]]["97.5%", ] 
+    )
+    
+    
+    
+  }
+  journal_data <- rbind(journal_data, topic_data)
+  print(journal_data)
+}
+
+library(ggplot2)
+
+p <- ggplot(journal_data, aes(x = journal, y = estimate, color = topic, group = topic)) +
+  geom_point(size = 3) + 
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) + 
+  facet_wrap(~ topic, scales = "free_y") + 
+  labs(
+    title = "Topic Distributions Across Journals",
+    x = "Journal",
+    y = "Estimated Topic Proportion"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 10, angle = 90, hjust = 1),
+    legend.position = "right"
+  )
+
+print(p)
+```
+```{r}
+ggsave(filename = "Plots/trend_journal.png",plot = p,width = 20, height = 20, dpi = 500)
+```
+
+```{r}
+search_results <- searchK(
+  documents = docs,
+  vocab = vocab,
+  K = seq(2, 16, by = 2),  
+  prevalence = ~ journal,
+  data = meta,
+  max.em.its = 75,
+  seed = 1234
+)
+
+search_results
+```
+
+

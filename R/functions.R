@@ -96,6 +96,8 @@ tfidf_plot_Bi <- function(journal_token_bi, year){
     bind_tf_idf(bigrams, index_paper, n) %>%  
     arrange(desc(tf_idf)) %>% slice_head(n = 20)
   
+  ifelse(year[1] == 2000, index_max <- 100,index_max <- 4000)
+  
   ggplot(bigrams_tfidf, aes(x = bigrams, y = index_paper, size = tf_idf)) +
     geom_point(alpha = 0.6, color = violet) +
     geom_text_repel(aes(label = ifelse(tf_idf > 0.3, bigrams, "")), size = 2) +
@@ -113,7 +115,8 @@ tfidf_plot_Bi <- function(journal_token_bi, year){
       legend.text = element_text(size = 10),
       panel.grid = element_blank(),
       axis.text.x = element_text(angle = 90, hjust = 1, size = 5)
-    )
+    )+
+    ylim(0, index_max)
   
   
 }
@@ -155,8 +158,6 @@ tfidf_plot_Uni <- function(journal_token, year){
       axis.text.x = element_text(angle = 90, hjust = 1, size = 5)
     )
   
-  
-  
 }
 
 
@@ -173,20 +174,20 @@ LDA_analysis <- function(groups, journal_data, k_values){
       filter(!grepl("\\b\\d+\\b", word)) 
     
     print(journal_token)
-    # 构建文档-词矩阵（DTM）
+   
     dtm <- journal_token %>%
       count(row_id, word) %>%
       cast_dtm(document = row_id, term = word, value = n)
     
-    # 针对每个 k 值循环
+   
     for (k in k_values) {
-      # 训练 LDA 模型
+    
       lda_model <- LDA(dtm, k = k, method = "Gibbs", control = list(seed = 42))
       
-      # 计算困惑度
+    
       perplexity_score <- perplexity(lda_model, dtm)
       
-      # 保存结果
+     
       lda_evaluation[[paste0("Group_", paste(group, collapse = "_"), "_K_", k)]] <- list(
         group = group,
         k = k,
@@ -196,4 +197,39 @@ LDA_analysis <- function(groups, journal_data, k_values){
     }
   }
   return(lda_evaluation)
+}
+
+
+tf_idf_table_bi <- function(journal_token_bi){
+  
+  #journal_token_bi <- journal_token_bi %>% rename(row_id = row_id)
+  data("stop_words")
+  journal_token_bi_cleaned <- journal_token_bi %>% filter(!grepl("\\b\\d+\\b", bigrams))
+  bigrams_separated <- journal_token_bi_cleaned %>% separate(bigrams, into = c("word1", "word2"), sep = " ")
+  bigrams_separated_remove_stop <- bigrams_separated %>% filter(!(word1 %in% stop_words$word) & !(word2 %in% stop_words$word)) %>% unite(bigrams, word1, word2, sep = " ")
+  bigrams_separated_cleaned <- bigrams_separated_remove_stop  %>% count(bigrams) %>% arrange(desc(n))
+  
+  bigrams_tfidf <- bigrams_separated_remove_stop %>%
+    count(row_id, bigrams) %>%        
+    bind_tf_idf(bigrams, row_id, n) %>%  
+    arrange(desc(tf_idf))
+  
+  return(bigrams_tfidf)
+  
+}
+
+tf_idf_table <- function(journal_token){
+  
+  journal_token <- journal_token %>% rename(index_paper = row_id)
+  data("stop_words")
+  journal_token_cleaned <- journal_token %>% anti_join(stop_words, by = c("word" = "word"))
+  journal_token_cleaned <- journal_token_cleaned %>% filter(!grepl("\\b\\d+\\b", word))
+  
+  unigrams_tfidf <- journal_token_cleaned %>%
+    count(index_paper, word) %>%        
+    bind_tf_idf(word, index_paper, n) %>%  
+    arrange(desc(tf_idf)) %>% head(200)
+  
+  return(unigrams_tfidf)
+  
 }
