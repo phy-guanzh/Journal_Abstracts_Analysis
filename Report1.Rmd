@@ -32,6 +32,7 @@ blue <- c('#17becf')
 #read data
 journal_data <- read.csv("./journal_data.csv")
 journal_data <- tibble(journal_data)
+journal_data
 journal_data <- journal_data %>%
   mutate(row_id = row_number())
 
@@ -42,7 +43,7 @@ journal_data <- journal_data %>% mutate(title_abstract = lemmatize_strings(title
 #prepare bag of words
 journal_token <- journal_data %>% select(row_id,title_abstract) %>% unnest_tokens(output = word, title_abstract, token = "words")
 
-journal_token <- journal_data %>% filter(year == 2000) %>% select(row_id,title_abstract) %>% unnest_tokens(output = word, title_abstract, token = "words")
+journal_token <- journal_data  %>% select(row_id,title_abstract) %>% unnest_tokens(output = word, title_abstract, token = "words")
 
 #data cleaning such as removing stop words and digital numbers
 journal_token <- journal_token %>% rename(index_paper = row_id)
@@ -61,6 +62,7 @@ group3 <- unique_years$year[14:18]
 group4 <- unique_years$year[19:nrow(unique_years)]
 
 groups <- list(group1,group2,group3,group4)
+test1
 ```
 
 ```{r}
@@ -635,6 +637,9 @@ print(p)
 
 ```{r}
 ggsave(filename = "Plots/trend_time.png",plot = p,width = 20, height = 20, dpi = 500)
+```
+```{r}
+journal
 ```
 
 ```{r}

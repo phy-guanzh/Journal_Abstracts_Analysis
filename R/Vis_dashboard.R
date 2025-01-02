@@ -11,7 +11,7 @@ ui <- fluidPage(
                   min = 1, 
                   max = nrow(top_100_bigrams_journal),
                   step = 1,
-                  value = min(50, nrow(top_100_bigrams_journal))),
+                  value = min(100, nrow(top_100_bigrams_journal))),
       selectInput("color", "Color Scheme", 
                   choices = c("random-light", "random-dark"), 
                   selected = "random-light"),

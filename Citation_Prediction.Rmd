@@ -24,11 +24,12 @@ library(stm)
 ```
 
 ```{r}
+
 #read data
-journal_data <- read.csv("./DDA/Datamining/assignment4/journal_data.csv")
+journal_data <- read.csv("/Users/zheguan/DDA/Datamining/assignment4/journal_data.csv")
 journal_data <- tibble(journal_data)
 journal_data <- journal_data %>%
-  mutate(row_id = row_number())
+  dplyr::mutate(row_id = dplyr::row_number())
 
 #prepare a column with title-abstract and do lemmatization
 journal_data$title_abstract <- paste0(journal_data$title," - ",journal_data$abstract)
@@ -141,7 +142,8 @@ prep <- prepDocuments(processed$documents, processed$vocab, processed$meta)
 
 removed_docs <- setdiff(seq_len(nrow(meta_data)), prep$meta$row_id)
 print(removed_docs)
-``````
+```
+
 ```{r}
 all_docs <- seq_len(nrow(meta_data))
 
@@ -331,7 +333,7 @@ journal_levels <- colnames(one_hot_journal)
 
 journal_data_onehot <- cbind(journal_data, one_hot_journal)
 
-
+journal_data_onehot
 ```
 ```{r}
 journal_data_re <- journal_data_onehot %>% select(year, pages, citations, row_id, V1, V2, V3, V4, V5, V6, author_count, `journalHealth Systems`, `journalJournal of Simulation`, `journalJournal of the Operational Research Society`)
@@ -343,8 +345,8 @@ journal_data_re
 ```
 
 ```{r}
-train_data_re <- journal_data_re %>% filter(row_id %in% train_row_ids)
-test_data_re <- journal_data_re %>% filter(!(row_id %in% train_row_ids))
+train_data_re <- journal_data_re %>% filter(row_id %in% train_row_ids) %>% select(-row_id)
+test_data_re <- journal_data_re %>% filter(!(row_id %in% train_row_ids)) %>% select(-row_id)
 ```
 
 ```{r}
@@ -355,37 +357,318 @@ summary(lm_model)
 
 ```
 
+
 ```{r}
-library(randomForest)
-
-rf_model <- randomForest(citations ~ ., data = train_data_re, ntree = 500, mtry = 3)
-
-print(rf_model)
-
-```
-```{r}
+library(caret)
 library(xgboost)
+library(doParallel)
 
-train_matrix <- as.matrix(train_data_re %>% select(-citations))
-train_label <- train_data_re$citations
+cl <- makeCluster(detectCores() - 1)  
+registerDoParallel(cl)
 
-test_matrix <- as.matrix(test_data_re %>% select(-citations))
-test_label <- test_data_re$citations
 
-xgb_model <- xgboost(
-  data = train_matrix, label = train_label,
-  nrounds = 1000, objective = "reg:squarederror"
+grid <- expand.grid(
+  nrounds = c(100, 200),          
+  eta = c(0.01, 0.1, 0.3),             
+  max_depth = c(3, 6),             
+  gamma = c(0, 1, 3),                  
+  colsample_bytree = c(0.6, 0.8, 1.0), 
+  min_child_weight = c(1, 5, 10),      
+  subsample = c(0.6, 0.8, 1.0)
 )
 
+
+train_control <- trainControl(
+  method = "cv",       
+  number = 3,          
+  verboseIter = FALSE,  
+  allowParallel = TRUE, 
+  search = "random"
+)
+
+
+xgb_grid <- train(
+  x = as.matrix(train_data_re[, -which(names(train_data_re) == "citations")]),
+  y = train_data_re$citations,
+  method = "xgbTree",
+  trControl = train_control,
+  tuneGrid = grid,
+  metric = "RMSE",
+  tuneLength = 500,
+  watchlist = watchlist,
+  verbose = 1 
+)
+
+
+print(xgb_grid$bestTune)
+
+saveRDS(xgb_grid, "xgb_grid_tuning.rds")
+
+stopCluster(cl)  
+registerDoSEQ()  
+
 ```
 
+```{r}
+best_xgb_model <- xgb_grid$finalModel
+```
+
+
+```{r}
+dtrain <- xgb.DMatrix(data = as.matrix(train_data_re[, -which(names(train_data_re) == "citations")]), label = train_data_re$citations)
+dtest <- xgb.DMatrix(data = as.matrix(test_data_re[, -which(names(test_data_re) == "citations")]), label = test_data_re$citations)
+
+watchlist <- list(train = dtrain, test = dtest)
+
+best_params <- xgb_grid$bestTune
+
+xgb_params <- list(
+  objective = "reg:squarederror",
+  eta = best_params$eta,
+  max_depth = best_params$max_depth,
+  gamma = best_params$gamma,
+  colsample_bytree = best_params$colsample_bytree,
+  min_child_weight = best_params$min_child_weight,
+  subsample = best_params$subsample
+)
+
+xgb_model <- xgb.train(
+  params = xgb_params,
+  data = dtrain,
+  nrounds = best_params$nrounds,
+  watchlist = watchlist,
+  eval_metric = "rmse",
+  verbose = 1
+)
+
+train_log <- xgb_model$evaluation_log
+print(train_log)
+
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(train_log, aes(x = iter)) +
+  geom_line(aes(y = train_rmse, color = "Train RMSE"), size = 1) +
+  geom_line(aes(y = test_rmse, color = "Test RMSE"), size = 1) +
+  labs(
+    title = "Learning Curve",
+    x = "Iteration",
+    y = "RMSE"
+  ) +
+  scale_color_manual(
+    name = "Error Type",
+    values = c("Train RMSE" = "blue", "Test RMSE" = "red")
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+library(SHAPforxgboost)
+
+train_matrix <- as.matrix(train_data_re[, -which(names(train_data_re) == "citations")])
+
+shap_values <- shap.values(
+  xgb_model = xgb_grid$finalModel,
+  X_train = train_matrix
+)
+
+shap_importance <- shap_values$mean_shap_score
+
+shap_long <- shap.prep(
+  shap_contrib = shap_values$shap_score,
+  X_train = train_matrix
+)
+
+shap.plot.summary(shap_long)
+
+```
+
+```{r}
+library(doParallel)
+
+cl <- makeCluster(detectCores() - 1)  
+registerDoParallel(cl)
+
+grid <- expand.grid(
+  mtry = c(2, 3, 5, 7)      
+)
+
+train_control <- trainControl(
+  method = "cv",
+  number = 3,
+  verboseIter = TRUE,
+  allowParallel = TRUE
+)
+
+
+rf_grid <- train(
+  citations ~ .,
+  data = train_data_re,
+  method = "rf",
+  trControl = train_control,
+  tuneGrid = grid,
+  metric = "RMSE",
+  ntree = 500
+)
+
+
+print(rf_grid$bestTune)
+stopCluster(cl)  
+registerDoSEQ() 
+```
+
+```{r}
+library(doParallel)
+library(caret)
+library(randomForest)
+library(ggplot2)
+
+
+cl <- makeCluster(detectCores() - 1)  
+registerDoParallel(cl)
+
+
+grid <- expand.grid(
+  mtry = c(2, 3, 5, 7)  
+)
+
+
+train_control <- trainControl(
+  method = "cv",        
+  number = 3,           
+  verboseIter = TRUE,   
+  allowParallel = TRUE  
+)
+
+
+rf_grid <- train(
+  citations ~ .,            
+  data = train_data_re,     
+  method = "rf",            
+  trControl = train_control,
+  tuneGrid = grid,
+  metric = "RMSE",
+  ntree = 500               
+)
+
+
+print(rf_grid$bestTune)
+
+
+rf_model <- randomForest(
+  citations ~ .,
+  data = train_data_re,
+  mtry = rf_grid$bestTune$mtry,
+  ntree = 500,
+  importance = TRUE,
+  keep.inbag = TRUE
+)
+
+
+oob_error <- rf_model$mse
+iterations <- 1:rf_model$ntree
+
+
+learning_curve <- data.frame(
+  Iterations = iterations,
+  OOB_Error = sqrt(oob_error)  
+)
+
+
+ggplot(learning_curve, aes(x = Iterations, y = OOB_Error)) +
+  geom_line(color = "blue", size = 1) +
+  labs(
+    title = "Learning Curve of Random Forest",
+    x = "Number of Trees",
+    y = "OOB RMSE"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12)
+  )
+
+
+stopCluster(cl)
+registerDoSEQ()
+
+```
+
+```{r}
+library(kernelshap)
+library(shapviz)
+library(doParallel)
+
+cl <- makeCluster(detectCores() - 1)  # 使用多核
+registerDoParallel(cl)
+
+features <- train_data_re[, -which(names(train_data_re) == "citations")]
+target <- train_data_re$citations
+
+# 选择背景样本 (random subsample of features)
+bg_X <- features[sample(1:nrow(features), 100), ]
+
+# 计算 SHAP 值
+shap_values <- kernelshap(
+  object = xgb_grid$finalModel,      # 训练好的模型
+  X = features[1:4000, ] %>% as.matrix(),  # 需要解释的前 100 个样本
+  bg_X = bg_X %>% as.matrix()
+)
+
+
+# 使用 shapviz 进行可视化
+sv <- shapviz(shap_values)
+# 绘制 Beeswarm 图
+sv_importance(sv, kind = "bee")  
+
+
+
+# 绘制单特征依赖图
+sv_dependence(sv, v = "pages")  # 根据需要替换特征名
+
+# 绘制条形图
+sv_importance(sv, kind = "bar")
+stopCluster(cl)  # 停止并释放多核集群
+registerDoSEQ()  # 恢复到默认的单线程执行
+```
+```{r}
+
+# 计算 SHAP 值
+shap_values_rf <- kernelshap(
+  object = rf_model,      # 训练好的模型
+  X = features[1:2000, ] ,  # 需要解释的前 100 个样本
+  bg_X = bg_X 
+)
+
+
+# 使用 shapviz 进行可视化
+sv_rf <- shapviz(shap_values_rf)
+# 绘制 Beeswarm 图
+sv_importance(sv_rf, kind = "bee")  
+
+
+
+# 绘制单特征依赖图
+sv_dependence(sv_rf, v = "pages")  # 根据需要替换特征名
+
+# 绘制条形图
+sv_importance(sv_rf, kind = "bar")
+
+```
 ```{r}
 library(Metrics)
 library(dplyr)
 
+
+
 lm_predictions <- predict(lm_model, test_data_re)
 rf_predictions <- predict(rf_model, test_data_re)
-xgb_predictions <- predict(xgb_model, test_matrix)
+xgb_predictions <- predict(xgb_model, dtest)
 
 results <- data.frame(
   Model = c("Linear Regression", "Random Forest", "XGBoost"),
@@ -407,9 +690,8 @@ results <- data.frame(
 )
 
 print(results)
-
-
 ```
+
 ```{r}
 library(ggplot2)
 library(tidyr)
@@ -433,9 +715,8 @@ ggplot(results_long, aes(x = Model, y = Value, group = Metric, color = Metric)) 
     axis.text = element_text(size = 12),
     legend.position = "none"  
   )
-
-
 ```
+
 ```{r}
 
 lm_residuals <- test_data_re$citations - lm_predictions
@@ -517,7 +798,8 @@ ggplot(relative_residual_data, aes(x = RelativeResiduals, fill = Model)) +
     axis.text = element_text(size = 12),
     legend.title = element_text(size = 12),
     legend.text = element_text(size = 10)
-  )
+  )+
+  xlim(-30,10)
 
 ```
 
@@ -553,6 +835,106 @@ residual_data_cdf <- residual_data %>%
   group_by(Model) %>%
   arrange(Residuals) %>%
   mutate(CDF = ecdf(Residuals)(Residuals))
+residual_data_cdf
+
+ggplot(residual_data_cdf, aes(x = Residuals, y = CDF, color = Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "CDF of Residuals Across Models",
+    x = "Residuals",
+    y = "Cumulative Probability"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )+
+  xlim(-30, 30)
+
+```
+```{r}
+ks.test(rf_residuals, xgb_residuals)
+
+```
+
+
+```{r}
+input_abstract <- "Productivity growth of institutions of higher education is of interest for two main reasons: education is an important factor for productivity growth of the economy, and in countries where higher education is funded by the public sector, accountability of resource use is of key interest. Educational services consist of teaching, research and the “third mission” of dissemination of knowledge to the society at large. A bootstrapped Malmquist productivity change index is used to calculate productivity development for Norwegian institutions of higher education over the 10-year period 2004–2013. The confidence intervals from bootstrapping allow part of the uncertainty of point estimates stemming from sample variation to be revealed. The main result is that the majority of institutions have had a positive productivity growth over the total period. However, when comparing with growth in labour input, the impact on productivity varies a lot."
+input_year <-"2017"
+input_journal_name <- "Journal of Simulation"
+
+
+```
+
+```{r}
+input_title_abstract <- paste0(input_title, " - ", input_abstract)
+input_title_abstract <- lemmatize_strings(input_title_abstract)
+input_title_abstract
+input_token <- tibble(
+  row_id = 1,  # 假设这是第一个文档
+  title_abstract = input_title_abstract,
+  year = input_year,
+  journal = input_journal_name
+)  %>%
+  unnest_tokens(output = word, input = title_abstract, token = "ngrams", n = 2) %>% 
+  separate(word, into = c("word1", "word2"), sep = " ") %>%  
+  filter(!word1 %in% stop_words$word, !word2 %in% stop_words$word) %>% 
+  filter(!grepl("\\b\\d+\\b", word1), !grepl("\\b\\d+\\b", word2)) %>% 
+  unite("bigram", word1, word2, sep = "-")
+print(input_token)
+```
+```{r}
+library(data.table)
+input_token
+input_token_dt <- as.data.table(input_token)
+input_token_dt <- input_token_dt[, .(text = paste(bigram, collapse = " ")), by = row_id]
+input_token_dt |> as.data.frame()
+```
+
+```{r}
+
+processed_new_doc <- textProcessor(
+  documents = input_token_dt$text,
+  metadata = data.frame(year = input_year, journal = input_journal_name),
+  customstopwords = NULL
+)
+
+prep_new <- prepDocuments(processed_new_doc$documents, processed_new_doc$vocab, processed_new_doc$meta, lower.thresh = 1)
+docs_new <- prep$documents
+vocab_new <- prep$vocab
+meta_new <- prep$meta
+
+
+aligned_new_doc <- alignCorpus(
+  old.vocab = dtm_model$vocab,
+  new = processed_new_doc
+)
+
+
+
+```
+
+
+```{r}
+new_doc_theta <- fitNewDocuments(
+  model = dtm_model,
+  documents = aligned_new_doc$documents
+)$theta
+
+new_doc_theta
+```
+
+```{r}
+test_data_re
+```
+```{r}
+residual_data_cdf <- residual_data %>%
+  group_by(Model) %>%
+  arrange(Residuals) %>%
+  mutate(CDF = ecdf(Residuals)(Residuals))
 
 
 ggplot(residual_data_cdf, aes(x = Residuals, y = CDF, color = Model)) +
@@ -570,7 +952,53 @@ ggplot(residual_data_cdf, aes(x = Residuals, y = CDF, color = Model)) +
     legend.title = element_text(size = 12),
     legend.text = element_text(size = 10)
   )+
-  xlim(-20, 20)
+  xlim(-10, 10)
+```
 
+
+```{r}
+
+# 用户输入的期刊名称
+input_journal_name <- "Journal of Simulation"
+input_pages <- "16"
+input_author_count <-"3"
+input_abstract <- "Productivity growth of institutions of higher education is of interest for two main reasons: education is an important factor for productivity growth of the economy, and in countries where higher education is funded by the public sector, accountability of resource use is of key interest. Educational services consist of teaching, research and the “third mission” of dissemination of knowledge to the society at large. A bootstrapped Malmquist productivity change index is used to calculate productivity development for Norwegian institutions of higher education over the 10-year period 2004–2013. The confidence intervals from bootstrapping allow part of the uncertainty of point estimates stemming from sample variation to be revealed. The main result is that the majority of institutions have had a positive productivity growth over the total period. However, when comparing with growth in labour input, the impact on productivity varies a lot."
+input_year <-"2017"
+input_journal_name <- "Journal of Simulation"
+
+
+data <- data.frame(
+  year = as.integer(input_year),
+  pages = as.integer(input_pages),
+  topic_1_prob = new_doc_theta[1],
+  topic_2_prob = new_doc_theta[2],
+  topic_3_prob = new_doc_theta[3],
+  topic_4_prob = new_doc_theta[4],
+  topic_5_prob = new_doc_theta[5],
+  topic_6_prob = new_doc_theta[6],
+  author_count = as.integer(input_author_count),
+  row_id = 1, 
+  Health_Systems = 0,
+  Journal_of_Simulation = 0,
+  Journal_of_the_Operational_Research_Society = 0
+)
+
+
+journal_columns <- c("Health_Systems", "Journal_of_Simulation", "Journal_of_the_Operational_Research_Society")
+data <- data %>%
+  mutate(across(all_of(journal_columns), ~ ifelse(gsub("_", " ", cur_column()) == input_journal_name, 1, 0)))
+
+```
+
+```{r}
+# 保存模型到文件
+saveRDS(lm_model, "best_lm_model.rds")
+saveRDS(best_rf_model, "best_rf_model.rds")
+saveRDS(best_xgb_model, "best_xgb_model.rds")
+saveRDS(dtm_model,"dtm_model_K6.rds")
+```
+
+```{r}
+journal_data[3,"abstract"] |> as.character()
 ```
 

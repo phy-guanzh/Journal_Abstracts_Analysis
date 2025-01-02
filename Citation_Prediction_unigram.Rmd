@@ -1,0 +1,861 @@
+---
+title: "Regression"
+author: "Zhe GUAN"
+date: "2024-12-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidytext)
+library(wordcloud2)
+library(textstem)
+library(ggplot2)
+library(ggpubr)
+library(topicmodels)
+library(tidyverse)
+library(stm)
+```
+
+```{r}
+#read data
+journal_data <- read.csv("./DDA/Datamining/assignment4/journal_data.csv")
+journal_data <- tibble(journal_data)
+journal_data <- journal_data %>%
+  mutate(row_id = row_number())
+
+#prepare a column with title-abstract and do lemmatization
+journal_data$title_abstract <- paste0(journal_data$title," - ",journal_data$abstract)
+journal_data <- journal_data %>% mutate(title_abstract = lemmatize_strings(title_abstract))
+
+```
+
+```{r}
+
+# 提取 unigram 而非 bigram
+journal_token <- journal_data %>%
+  select(row_id, title_abstract, year, journal) %>%
+  unnest_tokens(output = word, input = title_abstract, token = "words") %>%  # 改为 'words' 提取 unigram
+  filter(!word %in% stop_words$word) %>%  # 移除停用词
+  filter(!grepl("\\b\\d+\\b", word))  # 移除数字
+
+# 构建文档词项矩阵（DTM）
+dtm <- journal_token %>%
+  count(row_id, word) %>%  # 使用 'word' 而不是 'bigram'
+  cast_dtm(document = row_id, term = word, value = n)
+
+# 构建 metadata
+meta_data <- journal_data %>%
+  distinct(row_id, year, journal)
+
+# 合并文档内容
+documents <- journal_token %>%
+  group_by(row_id) %>%
+  summarise(text = paste(word, collapse = " "))  # 使用 'word' 代替 'bigram'
+
+# 处理文档
+processed <- textProcessor(
+  documents = documents$text,
+  metadata = meta_data,
+  customstopwords = NULL,
+  sparselevel = 1
+)
+
+# 准备数据
+prep <- prepDocuments(processed$documents, processed$vocab, processed$meta, lower.thresh = 1)
+docs <- prep$documents
+vocab <- prep$vocab
+meta <- prep$meta
+
+
+```
+
+
+```{r}
+search_results <- searchK(
+  documents = docs,
+  vocab = vocab,
+  K = seq(2, 10, by = 2),  
+  prevalence = ~ year+journal,
+  data = meta,
+  max.em.its = 75,
+  seed = 1234
+)
+
+search_results
+```
+```{r}
+
+results <- data.frame(
+  K = as.numeric(search_results$results$K),
+  exclus = as.numeric(search_results$results$exclus),
+  semcoh = as.numeric(search_results$results$semcoh),
+  heldout = as.numeric(search_results$results$heldout),
+  residual = as.numeric(search_results$results$residual),
+  bound = as.numeric(search_results$results$bound)
+)
+
+
+ggplot(results, aes(x = K)) +
+  geom_line(aes(y = exclus, color = "Exclusivity")) +
+  geom_line(aes(y = semcoh, color = "Semantic Coherence")) +
+  scale_color_manual(name = "Metrics", values = c("Exclusivity" = "blue", "Semantic Coherence" = "red")) +
+  labs(
+    title = "Exclusivity vs. Semantic Coherence",
+    x = "Number of Topics (K)", y = "Value"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r}
+
+dtm_model <- stm(
+  documents = docs,
+  vocab = vocab,
+  K = 6,  
+  prevalence = ~ year + journal,  
+  data = meta,
+  max.em.its = 75,
+  seed = 1234,
+)
+```
+```{r}
+labelTopics(dtm_model)
+```
+
+```{r}
+journal_data
+```
+```{r}
+topic_summary <- dtm_model$theta |> as.data.frame() 
+topic_summary
+```
+```{r}
+#check which documents are removed when we train the topic model.
+prep <- prepDocuments(processed$documents, processed$vocab, processed$meta)
+
+removed_docs <- setdiff(seq_len(nrow(meta_data)), prep$meta$row_id)
+print(removed_docs)
+``````
+```{r}
+all_docs <- seq_len(nrow(meta_data))
+
+
+complete_theta <- matrix(0, nrow = length(all_docs), ncol = ncol(dtm_model$theta))
+
+complete_theta[prep$meta$row_id, ] <- dtm_model$theta
+topic_summary <- as.data.frame(complete_theta)
+topic_summary
+```
+
+```{r}
+time_effect <- estimateEffect(
+  formula = c(1:6) ~ year,  
+  stmobj = dtm_model,
+  metadata = meta,
+  uncertainty = "Global"
+)
+
+effect_data <- data.frame()
+
+
+for (topic in 1:6) {
+  plot_data <- plot(
+    time_effect,
+    covariate = "year",
+    method = "continuous",
+    topics = topic,
+    print = FALSE
+  )
+  
+
+  topic_data <- data.frame(
+    year = plot_data$x,
+    topic = paste0("Topic ", topic),
+    estimate = plot_data$means[[1]],
+    lower = plot_data$ci[[1]]["2.5%", ],
+    upper = plot_data$ci[[1]]["97.5%", ]
+  )
+  effect_data <- rbind(effect_data, topic_data)
+}
+
+
+print(effect_data)
+
+
+p <- ggplot(effect_data, aes(x = year, y = estimate, color = topic)) +
+  geom_line(size = 1.2) +
+  geom_ribbon(aes(ymin = lower, ymax = upper, fill = topic), alpha = 0.2) +
+  facet_wrap(~ topic, scales = "free_y") +  
+  labs(
+    title = "Topic Trends Over Time",
+    x = "Year",
+    y = "Estimated Topic Proportion"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    legend.position = "none" 
+  )
+
+print(p)
+```
+
+```{r}
+journal_data <- journal_data %>% cbind(topic_summary)
+journal_data
+```
+
+```{r}
+source("/Users/zheguan/DDA/Datamining/assignment4/R/functions.R")
+journal_token <- journal_data %>%
+    select(row_id, title_abstract) %>%
+    unnest_tokens(output = word, title_abstract, token = "words")
+  
+tfidf_table <- tf_idf_table(journal_token)
+tfidf_table
+```
+```{r}
+tfidf_wide <- tfidf_table %>%
+  select(index_paper, word, tf_idf) %>%  
+  pivot_wider(names_from = word,   
+              values_from = tf_idf,  
+              values_fill = 0)       
+
+
+tfidf_wide
+```
+
+```{r}
+sample_fraction <- 0.8
+
+train_row_ids <- journal_data %>%
+  group_by(journal) %>%
+  sample_frac(sample_fraction) %>%
+  pull(row_id) 
+
+train_row_ids
+```
+```{r}
+train_sample_tfidf <- tfidf_wide %>% filter(index_paper %in% train_row_ids)
+train_sample_tfidf
+```
+```{r}
+tfidf_matrix <- train_sample_tfidf %>%
+  select(-index_paper) %>% 
+  as.matrix()
+
+constant_columns <- apply(tfidf_matrix, 2, function(x) var(x) == 0)
+zero_columns <- colSums(tfidf_matrix) == 0
+columns_to_remove <- constant_columns | zero_columns
+sum(columns_to_remove) 
+tfidf_matrix_clean <- tfidf_matrix[, !columns_to_remove]
+
+
+pca_model <- prcomp(tfidf_matrix, center = TRUE)
+
+
+```
+
+```{r}
+
+explained_variance <- (pca_model$sdev)^2 / sum((pca_model$sdev)^2)
+
+
+cumulative_variance <- cumsum(explained_variance)
+
+
+explained_df <- data.frame(
+  Principal_Component = seq_along(explained_variance),
+  Explained_Variance = explained_variance,
+  Cumulative_Variance = cumulative_variance
+)
+
+```
+
+```{r}
+library(ggplot2)
+
+
+ggplot(explained_df, aes(x = Principal_Component)) +
+  geom_bar(aes(y = Explained_Variance), stat = "identity", fill = "skyblue") +
+  geom_line(aes(y = Cumulative_Variance, group = 1), color = "red", size = 1) +
+  geom_point(aes(y = Cumulative_Variance), color = "red", size = 2) +
+  labs(
+    title = "Explained Variance by Principal Components",
+    x = "Principal Component",
+    y = "Variance Explained"
+  ) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12)
+  )+geom_hline(yintercept = 0.9, linetype = "dashed", color = "blue")
+
+```
+
+```{r}
+journal_data <- journal_data %>%
+  mutate(author_count = str_count(authors, "\\s+") + 1)
+
+head(journal_data)
+```
+
+
+
+```{r}
+train_data_re
+```
+```{r}
+library(caret)
+
+dummy_model <- dummyVars(~ journal, data = journal_data)
+
+
+one_hot_journal <- predict(dummy_model, newdata = journal_data)
+
+
+dim(one_hot_journal)
+
+
+journal_levels <- colnames(one_hot_journal)  
+
+journal_data_onehot <- cbind(journal_data, one_hot_journal)
+
+```
+```{r}
+journal_data_re <- journal_data_onehot %>% select(year, pages, citations, row_id, V1, V2, V3, V4, V5, V6, author_count, `journalHealth Systems`, `journalJournal of Simulation`, `journalJournal of the Operational Research Society`)
+colnames(journal_data_re) <- colnames(journal_data_re) %>%
+  gsub("^V(\\d+)$", "topic_\\1_prob", .) %>%
+  gsub("^journal", "", .) %>% 
+  gsub(" ", "_", .)
+journal_data_re
+```
+
+```{r}
+train_data_re <- journal_data_re %>% filter(row_id %in% train_row_ids)
+test_data_re <- journal_data_re %>% filter(!(row_id %in% train_row_ids))
+```
+
+```{r}
+
+lm_model <- lm(citations ~ ., data = train_data_re)
+
+summary(lm_model)
+
+```
+
+```{r}
+library(randomForest)
+
+rf_model <- randomForest(citations ~ ., data = train_data_re, ntree = 500, mtry = 3)
+
+print(rf_model)
+
+```
+```{r}
+library(xgboost)
+
+train_matrix <- as.matrix(train_data_re %>% select(-citations))
+train_label <- train_data_re$citations
+
+test_matrix <- as.matrix(test_data_re %>% select(-citations))
+test_label <- test_data_re$citations
+
+xgb_model <- xgboost(
+  data = train_matrix, label = train_label,
+  nrounds = 1000, objective = "reg:squarederror"
+)
+
+```
+
+```{r}
+library(Metrics)
+library(dplyr)
+
+lm_predictions <- predict(lm_model, test_data_re)
+rf_predictions <- predict(rf_model, test_data_re)
+xgb_predictions <- predict(xgb_model, test_matrix)
+
+results <- data.frame(
+  Model = c("Linear Regression", "Random Forest", "XGBoost"),
+  MSE = c(
+    mse(test_data_re$citations, lm_predictions),
+    mse(test_data_re$citations, rf_predictions),
+    mse(test_label, xgb_predictions)
+  ),
+  RMSE = c(
+    rmse(test_data_re$citations, lm_predictions),
+    rmse(test_data_re$citations, rf_predictions),
+    rmse(test_label, xgb_predictions)
+  ),
+  R2 = c(
+    cor(test_data_re$citations, lm_predictions)^2,
+    cor(test_data_re$citations, rf_predictions)^2,
+    cor(test_label, xgb_predictions)^2
+  )
+)
+
+print(results)
+
+
+```
+```{r}
+library(ggplot2)
+library(tidyr)
+
+results_long <- results %>%
+  pivot_longer(cols = c(MSE, RMSE, R2), names_to = "Metric", values_to = "Value")
+
+ggplot(results_long, aes(x = Model, y = Value, group = Metric, color = Metric)) +
+  geom_point(size = 3) +
+  geom_line(size = 1) +
+  facet_wrap(~Metric, scales = "free", ncol = 1) + 
+  labs(
+    title = "Comparison of Regression Models Across Metrics",
+    x = "Model",
+    y = "Value"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.position = "none"  
+  )
+
+
+```
+```{r}
+
+lm_residuals <- test_data_re$citations - lm_predictions
+rf_residuals <- test_data_re$citations - rf_predictions
+xgb_residuals <- test_label - xgb_predictions
+
+
+residual_data <- data.frame(
+  Residuals = c(lm_residuals, rf_residuals, xgb_residuals),
+  Model = rep(c("Linear Regression", "Random Forest", "XGBoost"), each = length(lm_residuals))
+)
+
+ggplot(residual_data, aes(x = Residuals, fill = Model)) +
+  geom_histogram(binwidth = 5, alpha = 0.7, position = "identity") +
+  labs(
+    title = "Residual Distribution Across Models",
+    x = "Residuals",
+    y = "Frequency"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+```
+```{r}
+
+ggplot(residual_data, aes(x = Residuals, color = Model, fill = Model)) +
+  geom_density(alpha = 0.4) +  
+  labs(
+    title = "Residual Density Across Models",
+    x = "Residuals",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )+
+  xlim(-10,50)
+
+```
+```{r}
+
+lm_residuals <- test_data_re$citations - lm_predictions
+rf_residuals <- test_data_re$citations - rf_predictions
+xgb_residuals <- test_label - xgb_predictions
+
+
+lm_relative_residuals <- lm_residuals / test_data_re$citations
+rf_relative_residuals <- rf_residuals / test_data_re$citations
+xgb_relative_residuals <- xgb_residuals / test_label
+
+
+relative_residual_data <- data.frame(
+  RelativeResiduals = c(lm_relative_residuals, rf_relative_residuals, xgb_relative_residuals),
+  Model = rep(c("Linear Regression", "Random Forest", "XGBoost"), each = length(lm_relative_residuals))
+)
+
+
+ggplot(relative_residual_data, aes(x = RelativeResiduals, fill = Model)) +
+  geom_density(alpha = 0.7) +
+  labs(
+    title = "Relative Residual Distribution Across Models",
+    x = "Relative Residuals",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )
+
+```
+
+```{r}
+library(ggplot2)
+
+
+residual_data <- data.frame(
+  Residuals = c(lm_residuals, rf_residuals, xgb_residuals),
+  Model = rep(c("Linear Regression", "Random Forest", "XGBoost"), each = length(lm_residuals))
+)
+
+
+ggplot(residual_data, aes(x = Model, y = Residuals, fill = Model)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 16, alpha = 0.7) +
+  labs(
+    title = "Residual Boxplot Across Models",
+    x = "Model",
+    y = "Residuals"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.position = "none"
+  )
+
+```
+```{r}
+
+residual_data_cdf <- residual_data %>%
+  group_by(Model) %>%
+  arrange(Residuals) %>%
+  mutate(CDF = ecdf(Residuals)(Residuals))
+
+
+ggplot(residual_data_cdf, aes(x = Residuals, y = CDF, color = Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "CDF of Residuals Across Models",
+    x = "Residuals",
+    y = "Cumulative Probability"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )+
+  xlim(-20, 20)
+
+```
+```{r}
+library(caret)
+library(xgboost)
+library(doParallel)
+
+cl <- makeCluster(detectCores() - 1)  # 使用多核
+registerDoParallel(cl)
+
+# 定义超参数搜索空间
+grid <- expand.grid(
+  nrounds = c(100, 200),          # 树的数量
+  eta = c(0.01, 0.1),             # 学习率
+  max_depth = c(3, 6),             # 树深度
+  gamma = c(0, 1, 3),                  # 正则化项
+  colsample_bytree = c(0.6, 0.8, 1.0), # 特征采样率
+  min_child_weight = c(1, 5, 10),      # 最小叶子节点权重
+  subsample = c(0.6, 0.8, 1.0)
+)
+
+# 设置训练控制
+train_control <- trainControl(
+  method = "cv",       # 使用交叉验证
+  number = 3,          # 3 折交叉验证
+  verboseIter = TRUE,  # 显示训练过程
+  allowParallel = TRUE, # 并行加速
+  search = "random"
+)
+
+# 使用 caret 训练 XGBoost 模型
+xgb_grid <- train(
+  x = as.matrix(train_data_re[, -which(names(train_data_re) == "citations")]),
+  y = train_data_re$citations,
+  method = "xgbTree",
+  trControl = train_control,
+  tuneGrid = grid,
+  metric = "RMSE",
+  tuneLength = 500
+)
+
+# 查看最佳参数组合
+print(xgb_grid$bestTune)
+
+saveRDS(xgb_grid, "xgb_grid_tuning.rds")
+
+stopCluster(cl)  # 停止并释放多核集群
+registerDoSEQ()  # 恢复到默认的单线程执行
+
+```
+
+```{r}
+best_xgb_model <- xgb_grid$finalModel
+```
+
+```{r}
+library(doParallel)
+
+cl <- makeCluster(detectCores() - 1)  # 使用多核
+registerDoParallel(cl)
+
+grid <- expand.grid(
+  mtry = c(2, 3, 5, 7)       # 特征数选择范围
+)
+
+train_control <- trainControl(
+  method = "cv",
+  number = 3,
+  verboseIter = TRUE,
+  allowParallel = TRUE
+)
+
+# 使用 caret 的 train 函数
+rf_grid <- train(
+  citations ~ .,
+  data = train_data_re,
+  method = "rf",
+  trControl = train_control,
+  tuneGrid = grid,
+  metric = "RMSE",
+  ntree = 500
+)
+
+# 查看最佳参数组合
+print(rf_grid$bestTune)
+stopCluster(cl)  # 停止并释放多核集群
+registerDoSEQ()  # 恢复到默认的单线程执行
+```
+```{r}
+best_rf_model <- rf_grid$finalModel
+```
+```{r}
+library(Metrics)
+library(dplyr)
+
+lm_predictions <- predict(lm_model, test_data_re)
+rf_predictions <- predict(best_rf_model, test_data_re)
+xgb_predictions <- predict(best_xgb_model, test_matrix)
+
+results <- data.frame(
+  Model = c("Linear Regression", "Random Forest", "XGBoost"),
+  MSE = c(
+    mse(test_data_re$citations, lm_predictions),
+    mse(test_data_re$citations, rf_predictions),
+    mse(test_label, xgb_predictions)
+  ),
+  RMSE = c(
+    rmse(test_data_re$citations, lm_predictions),
+    rmse(test_data_re$citations, rf_predictions),
+    rmse(test_label, xgb_predictions)
+  ),
+  R2 = c(
+    cor(test_data_re$citations, lm_predictions)^2,
+    cor(test_data_re$citations, rf_predictions)^2,
+    cor(test_label, xgb_predictions)^2
+  )
+)
+
+print(results)
+
+
+```
+
+```{r}
+lm_residuals <- test_data_re$citations - lm_predictions
+rf_residuals <- test_data_re$citations - rf_predictions
+xgb_residuals <- test_label - xgb_predictions
+
+
+residual_data <- data.frame(
+  Residuals = c(lm_residuals, rf_residuals, xgb_residuals),
+  Model = rep(c("Linear Regression", "Random Forest", "XGBoost"), each = length(lm_residuals))
+)
+
+```
+
+```{r}
+
+lm_relative_residuals <- lm_residuals / test_data_re$citations
+rf_relative_residuals <- rf_residuals / test_data_re$citations
+xgb_relative_residuals <- xgb_residuals / test_label
+
+
+relative_residual_data <- data.frame(
+  RelativeResiduals = c(lm_relative_residuals, rf_relative_residuals, xgb_relative_residuals),
+  Model = rep(c("Linear Regression", "Random Forest", "XGBoost"), each = length(lm_relative_residuals))
+)
+
+
+ggplot(relative_residual_data, aes(x = RelativeResiduals, fill = Model)) +
+  geom_density(alpha = 0.7) +
+  labs(
+    title = "Relative Residual Distribution Across Models",
+    x = "Relative Residuals (%)",
+    y = "Density"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )+
+  xlim(-20,10)
+
+```
+```{r}
+residual_data_cdf <- residual_data %>%
+  group_by(Model) %>%
+  arrange(Residuals) %>%
+  mutate(CDF = ecdf(Residuals)(Residuals))
+
+
+ggplot(residual_data_cdf, aes(x = Residuals, y = CDF, color = Model)) +
+  geom_line(size = 1) +
+  labs(
+    title = "CDF of Residuals Across Models",
+    x = "Residuals",
+    y = "Cumulative Probability"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10)
+  )+
+  xlim(-10, 10)
+```
+```{r}
+
+```
+
+```{r}
+journal_data[4,"abstract"]
+```
+
+
+```{r}
+input_abstract <- "Productivity growth of institutions of higher education is of interest for two main reasons: education is an important factor for productivity growth of the economy, and in countries where higher education is funded by the public sector, accountability of resource use is of key interest. Educational services consist of teaching, research and the “third mission” of dissemination of knowledge to the society at large. A bootstrapped Malmquist productivity change index is used to calculate productivity development for Norwegian institutions of higher education over the 10-year period 2004–2013. The confidence intervals from bootstrapping allow part of the uncertainty of point estimates stemming from sample variation to be revealed. The main result is that the majority of institutions have had a positive productivity growth over the total period. However, when comparing with growth in labour input, the impact on productivity varies a lot."
+input_year <-"2017"
+input_journal_name <- "Journal of Simulation"
+
+
+```
+
+```{r}
+journal_data[1,]
+```
+```{r}
+input_title_abstract <- paste0(input_title, " - ", input_abstract)
+input_title_abstract <- lemmatize_strings(input_title_abstract)
+input_token <- tibble(
+  row_id = 1,  # 假设这是第一个文档
+  title_abstract = input_title_abstract,
+  year = input_year,
+  journal = input_journal_name
+) %>%
+  select(row_id, title_abstract, year, journal) %>%
+  unnest_tokens(output = word, input = title_abstract, token = "words") %>%  # 改为 'words' 提取 unigram
+  filter(!word %in% stop_words$word) %>%  # 移除停用词
+  filter(!grepl("\\b\\d+\\b", word))  # 移除数字
+
+print(input_token)
+```
+
+```{r}
+library(data.table)
+input_token
+input_token_dt <- as.data.table(input_token)
+input_token_dt <- input_token_dt[, .(text = paste(word, collapse = " ")), by = row_id]
+input_token_dt |> as.data.frame()
+```
+```{r}
+processed_new_doc <- textProcessor(
+  documents = documents$text,
+  metadata = data.frame(year = input_year, journal = input_journal_name),
+  customstopwords = NULL
+)
+
+prep_new <- prepDocuments(processed_new_doc$documents, processed_new_doc$vocab, processed_new_doc$meta, lower.thresh = 1)
+docs_new <- prep$documents
+vocab_new <- prep$vocab
+meta_new <- prep$meta
+
+
+aligned_new_doc <- alignCorpus(
+  old.vocab = dtm_model$vocab,
+  new = processed_new_doc
+)
+
+
+
+```
+```{r}
+str(processed_new_doc)  # 查看文档结构
+length(processed_new_doc)  # 检查文档数量
+
+str(vocab)  # 查看词汇表结构
+length(vocab)  # 检查词汇表大小
+
+```
+```{r}
+temp<-textProcessor(documents=gadarian$open.ended.response[1:100],metadata=gadarian[1:100,])
+```
+
+```{r}
+out <- prepDocuments(temp$documents, temp$vocab, temp$meta)
+```
+```{r}
+set.seed(02138)
+#Maximum EM its is set low to make this run fast, run models to convergence!
+mod.out <- stm(out$documents, out$vocab, 3, prevalence=~treatment + s(pid_rep),
+              data=out$meta, max.em.its=5)
+```
+```{r}
+temp<-textProcessor(documents=gadarian$open.ended.response[101:nrow(gadarian)],
+                    metadata=gadarian[101:nrow(gadarian),])
+```
+
+```{r}
+newdocs <- alignCorpus(new=temp, old.vocab=mod.out$vocab)
+```
+

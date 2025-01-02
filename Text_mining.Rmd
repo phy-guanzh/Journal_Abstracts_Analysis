@@ -12,7 +12,7 @@ library(wordcloud2)
 library(textstem)
 ```
 ```{r}
-journal_data <- read.csv("./journal_data.csv")
+journal_data <- read.csv("/Users/zheguan//DDA/Datamining/assignment4/journal_data.csv")
 journal_data <- tibble(journal_data)
 journal_data <- journal_data %>%
                 mutate(row_id = row_number())

@@ -37,7 +37,7 @@ cleaning_plot_Uni <- function(journal_token, year) {
           legend.title = element_text(size = 12),
           legend.text = element_text(size = 12),
           panel.grid = element_blank(),
-          axis.text.x = element_text(size = 5),
+          axis.text.x = element_text(angle = 45, size = 10),
           axis.line = element_line(arrow = arrow(length = unit(0.15, "cm"), type = "closed"))
         )
       
@@ -67,13 +67,13 @@ cleaning_plot_Bi <- function(journal_token_bi, year) {
           y = "Frequency"
         )+
         theme(
-          plot.title = element_text(hjust = 0.5, face = "bold", size = 8),  
+          plot.title = element_text(hjust = 0.5, face = "bold", size = 15),  
           axis.title = element_text(size = 14),
           axis.text = element_text(size = 12),
           legend.title = element_text(size = 12),
           legend.text = element_text(size = 10),
           panel.grid = element_blank(),
-          axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 15),
           axis.line = element_line(arrow = arrow(length = unit(0.3, "cm"), type = "closed"))
         )
 }
