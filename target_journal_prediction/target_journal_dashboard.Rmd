@@ -1,0 +1,300 @@
+---
+title: "Target_journal_dashboard"
+output: flexdashboard::flex_dashboard
+runtime: shiny
+resource_files:
+- journal_plots/JSM.png
+- journal_plots/HS.png
+- journal_plots/JOR.png
+- data/classification_data.csv
+---
+
+
+```{r}
+library(shiny)
+library(tidyr)
+library(dplyr)
+library(tidytext)
+library(textstem)
+library(ggplot2)
+library(ggpubr)
+library(topicmodels)
+library(tidyverse)
+library(stm)
+library(data.table)
+library(caret)
+library(ranger)
+library(xgboost)
+library(reticulate)
+library(randomForest)
+
+joblib <- import("joblib")
+
+
+prepare_input_data <- function(input_data, model_features) {
+
+  input_data <- input_data[, model_features]
+  return(input_data)
+}
+
+model <- joblib$load("./classification_model/hdbscan_model.pkl")
+model2 <- pca_model <- readRDS("./classification_model/kmeans_model.rds")
+
+dtm_model <- readRDS("./classification_model/dtm_model.rds")
+lda_model <- readRDS("./classification_model/lda_model_2000_2022_k10.rds")
+
+numeric_data <- read_csv( "./data/clustering_data.csv")
+combined_bigrams_percentage <- read_csv("./data/top_words.csv")
+
+xgb_class_model <- readRDS("./classification_model/xgb_model.rds")
+rf_class_model <- readRDS("./classification_model/rf_model.rds")
+
+ui <- fluidPage(
+  titlePanel("Target Journal Prediction"),
+  sidebarLayout(
+    sidebarPanel(
+      numericInput("year", "Year of Publication:", 2023),
+      numericInput("pages", "Number of Pages:", 10),
+      numericInput("author_count", "Number of Authors:", 3),
+      textAreaInput("title", "Title:",  rows = 2, value = "Efficiency ranking of decision making units in data envelopment analysis by using TOPSIS-DEA method"),
+      textAreaInput("abstract", "Abstract:",  rows = 6, value = "Productivity growth of institutions of higher education is of interest for two main reasons: education is an important factor for productivity growth of the economy, and in countries where higher education is funded by the public sector, accountability of resource use is of key interest. Educational services consist of teaching, research and the “third mission” of dissemination of knowledge to the society at large. A bootstrapped Malmquist productivity change index is used to calculate productivity development for Norwegian institutions of higher education over the 10-year period 2004–2013. The confidence intervals from bootstrapping allow part of the uncertainty of point estimates stemming from sample variation to be revealed. The main result is that the majority of institutions have had a positive productivity growth over the total period. However, when comparing with growth in labour input, the impact on productivity varies a lot."),
+      
+      
+      actionButton("predict", "Predict")
+    ),
+    mainPanel(
+      uiOutput("title"),
+      uiOutput("lda_terms"),
+      uiOutput("stm_terms"),
+      uiOutput("rf_output"),
+      uiOutput("xgb_output"),
+      imageOutput("my_image", width = "400px", height = "200px"),
+      uiOutput("note"),
+      uiOutput("link"),
+      uiOutput("text")
+    )
+  ),
+    div(
+    style = "text-align: center; color: gray; margin-top: 20px;",
+    HTML("<p>This tool is for communication purposes only. Please do not use it for commercial purposes without the author's consent.</p>")
+  )
+)
+
+
+
+server <- function(input, output) {
+  observeEvent(input$predict, {
+    req(input$abstract)  
+    set.seed(42)
+    input_title_abstract <- paste0(input$title, " - ", input$abstract)
+    input_title_abstract <- lemmatize_strings(input_title_abstract)
+    input_token <- tibble(
+      row_id = 1,  
+      title_abstract = input_title_abstract,
+      year = input$year
+    )  %>%
+      unnest_tokens(output = word, input = title_abstract, token = "ngrams", n = 2) %>% 
+      separate(word, into = c("word1", "word2"), sep = " ") %>%  
+      filter(!word1 %in% stop_words$word, !word2 %in% stop_words$word) %>% 
+      filter(!grepl("\\b\\d+\\b", word1), !grepl("\\b\\d+\\b", word2)) %>% 
+      unite("bigram", word1, word2, sep = "-")
+    
+      input_token_dt <- as.data.table(input_token)
+      input_token_dt <- input_token_dt[, .(text = paste(bigram, collapse = " ")), by = row_id]
+      input_token_dt |> as.data.frame()
+      print(input_token)
+      processed_new_doc <- textProcessor(
+        documents = input_token_dt$text,
+        metadata = data.frame(year = input$year),
+        customstopwords = NULL
+      )
+      
+      prep_new <- prepDocuments(processed_new_doc$documents, processed_new_doc$vocab, processed_new_doc$meta, lower.thresh = 1)
+      docs_new <- prep_new$documents
+      vocab_new <- prep_new$vocab
+      meta_new <- prep_new$meta
+      
+      
+      aligned_new_doc <- alignCorpus(
+        old.vocab = dtm_model$vocab,
+        new = processed_new_doc
+      )
+
+    new_doc_theta <- fitNewDocuments(
+      model = dtm_model,
+      documents = aligned_new_doc$documents
+    )$theta
+
+    journal_token_bi <- tibble(row_id = 1, title_abstract = input_title_abstract) %>% 
+      select(row_id,title_abstract) %>% 
+      unnest_tokens(output = bigrams, title_abstract, token = "ngrams", n = 2) %>% 
+      filter(!grepl("\\b\\d+\\b", bigrams)) %>% 
+      separate(bigrams, into = c("word1", "word2"), sep = " ")   %>% 
+      filter(!(word1 %in% stop_words$word) & !(word2 %in% stop_words$word)) %>% unite(bigrams, word1, word2, sep = " ")
+    
+    dtm <- journal_token_bi %>%
+      count(row_id, bigrams) %>%
+      cast_dtm(document = row_id, term = bigrams, value = n)
+    
+    topic_probabilities_lda <- posterior(lda_model, dtm)
+    
+    top_terms_lda <- terms(lda_model, 5) %>% as.data.frame()
+    top_terms_stm <- labelTopics(dtm_model, n = 5)$prob %>% t() %>% as.data.frame()
+    
+    highest_topic_lda <- which.max(new_doc_theta)
+    highest_topic_stm <- which.max(topic_probabilities_lda$topics)
+    
+    output$title <- renderUI({
+      HTML(paste0(
+        "<h2> Target Journal Prediction Summary </h2>   "
+            )
+          )
+    })
+    
+    output$lda_terms <- renderUI({
+     HTML(
+      paste0(
+        "<h3> 1. LDA - Your Topic Terms of Abstract May Include: </h3> ",
+        " <strong><pre>  ", 
+        paste(top_terms_lda[, highest_topic_lda], collapse = ", "),
+        " ... </strong></pre>"
+            )
+          )
+    })
+    
+    
+    
+    output$stm_terms <- renderUI({
+     HTML(
+      paste0(
+        " <h3> 2. STM - Your Topic Terms of Abstract May Include: </h3> ",
+        "<strong><pre>  ", 
+        paste(top_terms_stm[, highest_topic_stm], collapse = ", "),
+        "... </strong> </pre>"
+            )
+          )
+    })
+    
+    
+    input_data <- data.frame(
+      year = input$year,
+      pages = input$pages,
+      author_count = input$author_count,
+      Topic_STM_1 = new_doc_theta[1],
+      Topic_STM_2 = new_doc_theta[2],
+      Topic_STM_3 = new_doc_theta[3],
+      Topic_STM_4 = new_doc_theta[4],
+      Topic_STM_5 = new_doc_theta[5],
+      Topic_STM_6 = new_doc_theta[6],
+      Topic_STM_7 = new_doc_theta[7],
+      Topic_STM_8 = new_doc_theta[8],
+      Topic_STM_9 = new_doc_theta[9],
+      Topic_STM_10 = new_doc_theta[10],
+      Topic_LDA_1 = topic_probabilities_lda$topics[1],
+      Topic_LDA_2 = topic_probabilities_lda$topics[2],
+      Topic_LDA_3 = topic_probabilities_lda$topics[3],
+      Topic_LDA_4 = topic_probabilities_lda$topics[4],
+      Topic_LDA_5 = topic_probabilities_lda$topics[5],
+      Topic_LDA_6 = topic_probabilities_lda$topics[6],
+      Topic_LDA_7 = topic_probabilities_lda$topics[7],
+      Topic_LDA_8 = topic_probabilities_lda$topics[8],
+      Topic_LDA_9 = topic_probabilities_lda$topics[9],
+      Topic_LDA_10 = topic_probabilities_lda$topics[10]
+    )
+    
+    numeric_data_add <- rbind(input_data, numeric_data %>% select(-cluster))
+    model$fit(numeric_data_add)
+    prediction <- model$fit_predict(numeric_data_add)
+    user_cluster <- tail(prediction, n = 1)
+    input_data <- input_data %>% mutate(cluster = user_cluster)
+    class_data <- input_data %>% select(-cluster) %>%   mutate(cluster = kmeans(rbind(numeric_data, input_data), centers = 3)$cluster %>% tail(n = 1)) 
+    
+    bigrams_JoS <- combined_bigrams_percentage %>% 
+      filter(journal == "Journal of Simulation") %>% 
+      pull(bigram)
+
+    bigrams_JoORS <- combined_bigrams_percentage %>% 
+      filter(journal == "Journal of the Operational Research Society") %>% 
+      pull(bigram)
+
+    bigrams_HS <- combined_bigrams_percentage %>% 
+      filter(journal == "Health Systems") %>% 
+      pull(bigram)
+    
+      HighFre_label <- input_token %>%
+        mutate(bigram = gsub("-", " ", bigram)) %>%
+        mutate(
+          HighFre_JoS = ifelse(bigram %in% bigrams_JoS, 1, 0),
+          HighFre_JoORS = ifelse(bigram %in% bigrams_JoORS , 1, 0),
+          HS = ifelse(bigram %in% bigrams_HS, 1, 0)) %>%
+          group_by(row_id)  %>%
+        summarise(
+          HighFre_JoS = max(HighFre_JoS),
+          HighFre_JoORS = max(HighFre_JoORS),
+          HS = max(HS),
+          .groups = "drop"
+           )
+
+      class_data <- class_data %>% cbind(HighFre_label)
+      
+      d_input <- xgb.DMatrix(data = class_data[,xgb_class_model$feature_names] %>% mutate(across(everything(), as.numeric)) %>%    as.matrix())
+      
+      xgb_input_pred <- predict(xgb_class_model, d_input) %>% factor( levels = 0:2, labels = c("Health Systems", "Journal of Simulation", "Journal of the Operational Research Society")) %>% as.character()
+      
+      rf_input_pred <- predict(rf_class_model, class_data) %>% as.character()
+      
+    
+      print(xgb_input_pred)
+      print(rf_input_pred)
+
+    output$xgb_output <- renderUI({
+      HTML(paste0(
+        "<h3> 4. XGBoost evaluates your Target Journal is: </h3>  ",
+        "<strong><pre>  ", 
+        xgb_input_pred,
+        "  </pre></strong>"
+            )
+          )
+    })
+      
+    #output$rf_output <- renderText({
+    #  paste("Random Forest Model think your target journal is:\n", rf_input_pred)
+    #})
+    
+    output$rf_output <- renderUI({
+      HTML(paste0(
+        "<h3> 3. Random Forest evaluates your Target Journal is: </h3>  ",
+        "<strong><pre>  ", 
+        rf_input_pred,
+        "  </pre></strong>"
+            )
+          )
+    })
+      
+    
+    fig_path <- ifelse(xgb_input_pred != "Journal of the Operational Research Society", 
+                       ifelse(xgb_input_pred =="Health Systems", "HS", "JOS" ), "JOR")
+    
+    print(fig_path)
+    print(paste0("www/",fig_path))
+
+   output$my_image <- renderImage({
+    img_path <- paste0("journal_plots/",fig_path,".png")
+    list(src = img_path, height = 200, width = 400)
+  }, deleteFile = FALSE)  
+
+  output$note <- renderUI({
+    HTML("<em> <small> NOTE: The key words are from the highest probility topics from LDA/STM models, more information can be found in the paper: </em> </small> <br>
+    <b> <a href='https://github.com/phy-guanzh/Paper_Journal_Classification/blob/main/Where_Will_Your_Paper_Go__Predicting_Journal_Submission_and_Citations_with_Topic_Models.pdf' target='_blank'> Where Will Your Paper Go? Predicting Journal Submission and Citations with Topic Models</a> <b>")
+  })
+  
+  
+
+  
+  })
+}
+
+
+shinyApp(ui = ui, server = server)
+
+```

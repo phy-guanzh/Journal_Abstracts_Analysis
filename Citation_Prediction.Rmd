@@ -604,59 +604,58 @@ library(kernelshap)
 library(shapviz)
 library(doParallel)
 
-cl <- makeCluster(detectCores() - 1)  # 使用多核
+cl <- makeCluster(detectCores() - 1) 
 registerDoParallel(cl)
 
 features <- train_data_re[, -which(names(train_data_re) == "citations")]
 target <- train_data_re$citations
 
-# 选择背景样本 (random subsample of features)
 bg_X <- features[sample(1:nrow(features), 100), ]
 
-# 计算 SHAP 值
+
 shap_values <- kernelshap(
-  object = xgb_grid$finalModel,      # 训练好的模型
-  X = features[1:4000, ] %>% as.matrix(),  # 需要解释的前 100 个样本
+  object = xgb_grid$finalModel,     
+  X = features[1:4000, ] %>% as.matrix(),  
   bg_X = bg_X %>% as.matrix()
 )
 
 
-# 使用 shapviz 进行可视化
+
 sv <- shapviz(shap_values)
-# 绘制 Beeswarm 图
+
 sv_importance(sv, kind = "bee")  
 
 
 
-# 绘制单特征依赖图
-sv_dependence(sv, v = "pages")  # 根据需要替换特征名
 
-# 绘制条形图
+sv_dependence(sv, v = "pages")  
+
+
 sv_importance(sv, kind = "bar")
-stopCluster(cl)  # 停止并释放多核集群
-registerDoSEQ()  # 恢复到默认的单线程执行
+stopCluster(cl) 
+registerDoSEQ()  
 ```
 ```{r}
 
-# 计算 SHAP 值
+
 shap_values_rf <- kernelshap(
-  object = rf_model,      # 训练好的模型
-  X = features[1:2000, ] ,  # 需要解释的前 100 个样本
+  object = rf_model,     
+  X = features[1:2000, ] ,  
   bg_X = bg_X 
 )
 
 
-# 使用 shapviz 进行可视化
+
 sv_rf <- shapviz(shap_values_rf)
-# 绘制 Beeswarm 图
+
 sv_importance(sv_rf, kind = "bee")  
 
 
 
-# 绘制单特征依赖图
-sv_dependence(sv_rf, v = "pages")  # 根据需要替换特征名
 
-# 绘制条形图
+sv_dependence(sv_rf, v = "pages") 
+
+
 sv_importance(sv_rf, kind = "bar")
 
 ```
@@ -874,7 +873,7 @@ input_title_abstract <- paste0(input_title, " - ", input_abstract)
 input_title_abstract <- lemmatize_strings(input_title_abstract)
 input_title_abstract
 input_token <- tibble(
-  row_id = 1,  # 假设这是第一个文档
+  row_id = 1, 
   title_abstract = input_title_abstract,
   year = input_year,
   journal = input_journal_name
@@ -958,7 +957,7 @@ ggplot(residual_data_cdf, aes(x = Residuals, y = CDF, color = Model)) +
 
 ```{r}
 
-# 用户输入的期刊名称
+
 input_journal_name <- "Journal of Simulation"
 input_pages <- "16"
 input_author_count <-"3"
@@ -991,7 +990,7 @@ data <- data %>%
 ```
 
 ```{r}
-# 保存模型到文件
+
 saveRDS(lm_model, "best_lm_model.rds")
 saveRDS(best_rf_model, "best_rf_model.rds")
 saveRDS(best_xgb_model, "best_xgb_model.rds")

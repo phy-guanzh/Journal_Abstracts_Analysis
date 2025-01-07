@@ -1,0 +1,318 @@
+---
+title: "Clustering"
+author: "Zhe GUAN"
+date: "2025-01-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(tidytext)
+library(wordcloud2)
+library(textstem)
+library(ggplot2)
+library(ggpubr)
+library(topicmodels)
+library(tidyverse)
+journal_data <- read.csv("/Users/zheguan/DDA/Datamining/assignment4/journal_data.csv")
+journal_data
+```
+
+```{r}
+library(ggplot2)
+
+
+numeric_cols <- sapply(journal_data, is.numeric)
+numeric_data <- journal_data[, numeric_cols]
+
+col_names <- colnames(numeric_data)
+```
+
+
+#plot pairs distributions !!! time-consuming
+```{r}
+
+for (i in 1:(length(col_names) - 1)) {
+  for (j in (i + 1):length(col_names)) {
+   
+    x_var <- col_names[i]
+    y_var <- col_names[j]
+    
+   
+    p <- ggplot(journal_data, aes_string(x = x_var, y = y_var, color = "journal")) +
+      geom_point(alpha = 0.6) +
+      labs(title = paste("Scatterplot of", x_var, "vs", y_var)) +
+      theme_minimal()
+    
+    
+    print(p)
+    
+    #ggsave(filename = paste0("/Users/zheguan/DDA/Datamining/assignment4/Plots/scatter_", x_var, "_vs_", y_var, ".png"), plot = p, width = 8, height = 6)
+  }
+}
+
+
+```
+```{r}
+numeric_data <- numeric_data %>% select(-altmetric)
+ncol(numeric_data)
+numeric_data <- numeric_data %>% select(-c(row_id,citations))
+numeric_data
+
+```
+
+#TF-IDF df
+```{r}
+bigrams_data <- journal_data %>%
+  unnest_tokens(output = word, input = title_abstract, token = "ngrams", n = 2) %>%
+  separate(word, into = c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word, !word2 %in% stop_words$word) %>%
+  filter(!grepl("\\b\\d+\\b", word1), !grepl("\\b\\d+\\b", word2)) %>%
+  unite("bigram", word1, word2, sep = "-")
+
+bigram_tfidf <- bigrams_data %>%
+  count(row_id, bigram, sort = TRUE) %>%  
+  bind_tf_idf(bigram, row_id, n) %>%
+  arrange(desc(tf_idf))
+
+
+bigram_tfidf_matrix <- bigram_tfidf %>%
+  select(row_id, bigram, tf_idf) %>%
+  pivot_wider(names_from = bigram, values_from = tf_idf, values_fill = 0)
+
+
+bigram_tfidf_df <- as.data.frame(bigram_tfidf_matrix)
+
+
+```
+
+```{r}
+
+if (nrow(bigram_tfidf_df) == nrow(numeric_data)) {
+  combined_data <- cbind(numeric_data, bigram_tfidf_df[, -1])  # remove row_id
+} else {
+  stop("please check the two dataframe shapes!!")
+}
+
+
+```
+#only chose var greater than 0.01 variables
+```{r}
+
+combined_data <- combined_data[, apply(combined_data, 2, var) > 0.01]
+```
+
+```{r}
+
+library(irlba)
+pca_result <- prcomp_irlba(combined_data, n = 50, scale. = TRUE)  
+```
+
+```{r}
+
+library(umap)
+library(dbscan)
+
+pca_result <- prcomp(combined_data , scale. = TRUE, tol = 0.01)
+
+summary(pca_result)
+
+
+pca_result$rotation
+
+explained_variance <- (pca_result$sdev)^2 / sum((pca_result$sdev)^2)
+
+
+cumulative_variance <- cumsum(explained_variance)
+
+
+explained_df <- data.frame(
+  Principal_Component = seq_along(explained_variance),
+  Explained_Variance = explained_variance,
+  Cumulative_Variance = cumulative_variance
+)
+
+pca_clustering <- ggplot(explained_df, aes(x = Principal_Component)) +
+  geom_bar(aes(y = Explained_Variance), stat = "identity", fill = "skyblue") +
+  geom_line(aes(y = Cumulative_Variance, group = 1), color = "red", size = 1) +
+  geom_point(aes(y = Cumulative_Variance), color = "red", size = 2) +
+  labs(
+    #title = "Explained Variance by Principal Components",
+    x = "Principal Component",
+    y = "Variance Explained"
+  ) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    panel.grid = element_blank(),
+    axis.line = element_line(arrow = arrow(length = unit(0.3, "cm"), type = "closed"))
+    
+  )+geom_hline(yintercept = 0.9, linetype = "dashed", color = "blue")
+
+print(pca_clustering)
+```
+
+
+
+```{r}
+reticulate::py_install("hdbscan")
+library(reticulate)
+
+hdbscan <- import("hdbscan")
+```
+
+```{r}
+model <- hdbscan$HDBSCAN(min_cluster_size = as.integer(20))
+model$fit(numeric_data) 
+numeric_data
+```
+```{r}
+
+reticulate::py_install("joblib")
+joblib <- import("joblib")
+joblib$dump(model, "/Users/zheguan/DDA/Datamining/assignment4/R/hdbscan_model.pkl")
+```
+
+```{r}
+
+clusters <- model$labels_
+print(clusters)
+
+```
+```{r}
+
+table(clusters, journal_data$journal)
+
+```
+```{r}
+library(caret)
+
+numeric_data$cluster <- as.factor(clusters)
+set.seed(123)
+kmeans_result <- kmeans(numeric_data, centers = 3)
+```
+```{r}
+table(kmeans_result$cluster,journal_data$journal)
+saveRDS(kmeans_result, "kmeans_model.rds")
+```
+
+```{r}
+
+bigram_tfidf_df$cluster <- kmeans_result$cluster
+
+
+
+cluster_tfidf_means <- bigram_tfidf_df %>%
+  group_by(cluster) %>%
+  summarise(across(everything(), mean, na.rm = TRUE))
+
+top_words <- cluster_tfidf_means %>%
+  rowwise() %>%
+  mutate(top_word = names(.)[which.max(c_across(-cluster))])
+
+
+top_words %>%
+  select(cluster, top_word)
+cluster_tfidf_means
+```
+
+
+#check top words in each clusters
+```{r}
+library(dplyr)
+library(tidyr)
+
+
+top_words_by_cluster <- cluster_tfidf_means %>%
+  select(-row_id) %>%  
+  pivot_longer(cols = -cluster, names_to = "word", values_to = "tfidf") %>%
+  arrange(cluster, desc(tfidf)) %>%  
+  group_by(cluster) %>%
+  slice_head(n = 3)   #top3
+
+top_words_by_cluster
+top_words_by_cluster %>% 
+  pivot_wider(names_from = cluster, values_from = tfidf, values_fill = 0)
+
+
+```
+
+
+#check the binary variable indicating whether abstract data contains the top words in journals.
+```{r}
+library(dplyr)
+library(tidyr)
+library(tidytext)
+
+
+tokenized_bigrams <- journal_data %>%
+  unnest_tokens(output = word, input = title_abstract, token = "ngrams", n = 2) %>%
+  separate(word, into = c("word1", "word2"), sep = " ") %>%
+  filter(!word1 %in% stop_words$word, !word2 %in% stop_words$word) %>%
+  filter(!grepl("\\b\\d+\\b", word1), !grepl("\\b\\d+\\b", word2)) %>%
+  unite("bigram", word1, word2, sep = " ")
+
+```
+
+```{r}
+
+combined_bigrams_percentage <- tokenized_bigrams %>%
+  group_by(journal, bigram) %>%           
+  summarise(n = n()) %>% arrange(journal, desc(n)) %>% group_by(journal) %>% slice_head(n = 10)
+
+bigrams_JoS <- combined_bigrams_percentage %>% 
+  filter(journal == "Journal of Simulation") %>% 
+  pull(bigram)
+
+bigrams_JoORS <- combined_bigrams_percentage %>% 
+  filter(journal == "Journal of the Operational Research Society") %>% 
+  pull(bigram)
+
+bigrams_HS <- combined_bigrams_percentage %>% 
+  filter(journal == "Health Systems") %>% 
+  pull(bigram)
+
+```
+
+```{r}
+HighFre_label <- tokenized_bigrams %>%
+  mutate(
+    HighFre_JoS = ifelse(bigram %in% bigrams_JoS & journal == "Journal of Simulation", 1, 0),
+    HighFre_JoORS = ifelse(bigram %in% bigrams_JoORS & journal == "Journal of the Operational Research Society", 1, 0),
+    HS = ifelse(bigram %in% bigrams_HS & journal == "Health Systems", 1, 0)) %>%
+    group_by(row_id, journal)  %>%
+  summarise(
+    HighFre_JoS = max(HighFre_JoS),
+    HighFre_JoORS = max(HighFre_JoORS),
+    HS = max(HS),
+    .groups = "drop"
+  )
+
+```
+
+```{r}
+
+final_data <- journal_data %>%
+  select(-journal) %>%
+  left_join(HighFre_label, by = c("row_id"))
+final_data
+```
+
+```{r}
+final_data <- final_data %>% mutate(cluster = kmeans_result$cluster)
+final_data
+```
+
+```{r}
+write.csv(combined_bigrams_percentage, "/Users/zheguan/DDA/Datamining/assignment4/R/top_words.csv", row.names = FALSE)
+write.csv(final_data, "/Users/zheguan/DDA/Datamining/assignment4/R/classification_data.csv", row.names = FALSE)
+```
+

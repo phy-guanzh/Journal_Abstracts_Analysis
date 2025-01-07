@@ -1,0 +1,373 @@
+---
+title: "Classification"
+author: "Zhe GUAN"
+date: "2025-01-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r}
+dark_blue <- c("#1f77b4")
+orange <- c("#ff7f0e")
+red <- c("#F26666")
+bright_red <- c("#FF4500")
+violet <- c("#EE82EE")
+yellow <- c("#FFDF00")
+gray <- c('#778899')
+violet2 <- c("#DE3163")
+green <- c('#2ca02c')
+blue <- c('#17becf')
+```
+
+```{r}
+final_data <- read.csv("/Users/zheguan/DDA/Datamining/assignment4/R/classification_data.csv")
+```
+
+```{r}
+final_data
+```
+
+#remove the variables we do not know prior to submission
+```{r}
+class_data <- final_data %>% select(-c(title, views, citations, altmetric, abstract, title_abstract, authors))
+```
+
+```{r}
+train_id <- class_data %>% group_by(journal) %>% sample_frac(0.8) %>%  pull(row_id) 
+```
+
+```{r}
+train_data <- class_data %>% filter(row_id %in% train_id) 
+test_data <- class_data %>% filter(!(row_id %in% train_id) )
+train_data
+test_data
+```
+```{r}
+train_data$journal <- as.factor(train_data$journal)
+test_data$journal <- as.factor(test_data$journal)
+```
+
+```{r}
+library(class)
+
+
+train_x <- train_data[, -which(names(train_data) == "journal")]
+train_y <- train_data$journal
+
+test_x <- test_data[, -which(names(test_data) == "journal")]
+test_y <- test_data$journal
+
+
+set.seed(123)  
+pred <- knn(train = train_x, test = test_x, cl = train_y, k = 20)
+
+
+accuracy <- sum(pred == test_y) / length(test_y)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+```
+
+```{r}
+library(caret)
+
+
+conf_matrix_knn <- confusionMatrix(pred, test_y)
+print(conf_matrix_knn)
+
+
+precision_knn <- conf_matrix_knn$byClass[,"Precision"]
+recall_knn <- conf_matrix_knn$byClass[,"Recall"]
+f1_score_knn <- conf_matrix_knn$byClass[,"F1"]
+
+
+print(paste("Precision:", round(precision_knn, 2)))
+print(paste("Recall:", round(recall_knn, 2)))
+print(paste("F1 Score:", round(f1_score_knn, 2)))
+
+```
+
+#Logic regression
+```{r}
+
+library(nnet)
+
+set.seed(123)
+model_lg <- multinom(journal ~ ., data = train_data)
+
+
+pred_prob_lg <- predict(model_lg, test_data, type = "probs") 
+pred_lg <- predict(model_lg, test_data) 
+
+
+accuracy <- sum(pred_lg == test_data$journal) / nrow(test_data)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+```
+
+```{r}
+
+conf_matrix_lg <- confusionMatrix(pred_lg, test_data$journal)
+print(conf_matrix_lg)
+
+precision_lg <- conf_matrix_lg$byClass[, "Precision"]
+recall_lg <- conf_matrix_lg$byClass[, "Recall"]
+f1_score_lg <- conf_matrix_lg$byClass[, "F1"]
+
+print(paste("Precision:", round(precision_lg, 2)))
+print(paste("Recall:", round(recall_lg, 2)))
+print(paste("F1 Score:", round(f1_score_lg, 2)))
+
+
+```
+
+#Random Forest
+```{r}
+
+library(randomForest)
+
+
+train_data$journal <- as.factor(train_data$journal)
+test_data$journal <- as.factor(test_data$journal)
+
+
+set.seed(123)
+rf_model <- randomForest(journal ~ ., data = train_data, ntree = 500, mtry = 3)
+
+
+rf_pred <- predict(rf_model, test_data)
+
+
+library(caret)
+rf_conf_matrix <- confusionMatrix(rf_pred, test_data$journal)
+print(rf_conf_matrix)
+
+```
+
+
+#XGboost
+```{r}
+
+library(xgboost)
+
+train_x <- as.matrix(train_data[, -which(names(train_data) == "journal")])
+train_y <- as.numeric(train_data$journal) - 1 
+
+test_x <- as.matrix(test_data[, -which(names(test_data) == "journal")])
+test_y <- as.numeric(test_data$journal) - 1
+
+
+dtrain <- xgb.DMatrix(data = train_x, label = train_y)
+dtest <- xgb.DMatrix(data = test_x, label = test_y)
+
+
+params <- list(
+  objective = "multi:softmax", 
+  num_class = length(unique(train_data$journal)),
+  max_depth = 6,
+  eta = 0.3,
+  nthread = 2
+)
+
+
+set.seed(123)
+xgb_model <- xgb.train(params = params, data = dtrain, nrounds = 100)
+
+
+xgb_pred <- predict(xgb_model, dtest)
+
+
+accuracy <- sum(xgb_pred == test_y) / length(test_y)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+
+library(caret)
+
+xgb_pred <- factor(xgb_pred, levels = 0:2, labels = levels(test_data$journal))
+#xgb_pred <- factor(xgb_pred, levels = 0:(length(unique(test_data$journal)) - 1))
+test_y <- factor(test_y, levels = 0:2, labels = levels(test_data$journal))
+
+xgb_conf_matrix <- confusionMatrix(xgb_pred, test_y)
+print(xgb_conf_matrix)
+levels(test_data$journal)
+```
+
+#SVM model
+```{r}
+
+library(e1071)
+
+
+svm_model <- svm(journal ~ ., data = train_data, kernel = "radial")
+
+
+svm_pred <- predict(svm_model, test_data)
+
+
+svm_conf_matrix <- confusionMatrix(svm_pred, test_data$journal)
+print(svm_conf_matrix)
+
+```
+
+#NN model
+```{r}
+
+library(neuralnet)
+
+
+train_x <- scale(train_data[, -which(names(train_data) == "journal")])
+test_x <- scale(test_data[, -which(names(test_data) == "journal")])
+
+
+train_y <- model.matrix(~ journal - 1, data = train_data)
+
+
+train_data_nn <- cbind(train_x, train_y)
+train_data_nn
+
+colnames(train_data_nn) <- gsub("journal| ", "", colnames(train_data_nn))
+
+
+print(colnames(train_data_nn))
+
+
+nn_model <- neuralnet(HealthSystems + JournalofSimulation + JournaloftheOperationalResearchSociety ~ ., 
+                      data = train_data_nn, hidden = c(10, 5), linear.output = FALSE)
+
+
+nn_pred <- compute(nn_model, test_x)$net.result
+
+
+nn_pred_class <- apply(nn_pred, 1, which.max)
+
+
+test_y <- as.numeric(test_data$journal)
+accuracy <- sum(nn_pred_class == test_y) / length(test_y)
+print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
+nn_pred_factor <- factor(nn_pred_class, levels = 1:length(unique(test_data$journal)), labels = levels(test_data$journal))
+test_y_factor <- factor(test_y, levels = 1:length(unique(test_data$journal)), labels = levels(test_data$journal))
+
+
+conf_matrix <- confusionMatrix(nn_pred_factor, test_y_factor)
+
+
+print(conf_matrix)
+
+```
+```{r}
+
+
+get_metrics <- function(pred, actual) {
+  cm <- confusionMatrix(pred, actual)
+  classes <- rownames(cm$byClass)
+  precision <- cm$byClass[,"Precision"]
+  recall <- cm$byClass[,"Recall"]
+  f1 <- cm$byClass[,"F1"]
+  accuracy <- diag(cm$table) / rowSums(cm$table)
+  metrics <- data.frame(
+    Journal = classes,
+    Precision = round(precision, 4),
+    Recall = round(recall, 4),
+    F1_Score = round(f1, 4),
+    Accuracy = round(accuracy, 4)
+  )
+  
+  return(metrics)
+}
+
+
+
+metrics_knn <- get_metrics(pred, test_data$journal)
+metrics_lg <- get_metrics(pred_lg, test_data$journal)
+metrics_rf <- get_metrics(rf_pred, test_data$journal)
+
+metrics_xgb <- get_metrics(xgb_pred, test_data$journal)
+metrics_nn <- get_metrics(nn_pred_factor, test_data$journal)
+metrics_svm <- get_metrics(svm_pred, test_data$journal)
+metrics_xgb 
+
+library(ggplot2)
+library(reshape2)
+
+metrics_all <- rbind(
+  cbind(Model = "KNN", metrics_knn),
+  cbind(Model = "Logistic Regression", metrics_lg),
+  cbind(Model = "Random Forest", metrics_rf),
+  cbind(Model = "XGBoost", metrics_xgb),
+  cbind(Model = "Neural Network", metrics_nn),
+  cbind(Model = "SVM", metrics_svm)
+)
+
+
+
+metrics_long <- melt(metrics_all, id.vars = c("Model", "Journal"))
+
+
+class_metrics <- ggplot(metrics_long, aes(x = Journal, y = value, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_minimal() +
+  labs(#title = "Model Performance by Journal",
+       y = "Score", fill = "Model") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        panel.grid = element_blank(),
+        axis.text.y = element_text(size = 10))
+
+ggsave(filename = "/Users/zheguan/DDA/Datamining/assignment4/Plots/class_metrics_all.png",plot = class_metrics,width = 10, height = 10, dpi = 500)
+print(class_metrics)
+```
+
+
+
+
+```{r}
+
+conf_matrix_svm <- confusionMatrix(svm_pred, test_data$journal)
+conf_matrix_xgb <- confusionMatrix(xgb_pred, test_data$journa)
+conf_matrix_rf <- confusionMatrix(rf_pred, test_data$journa)
+
+print(conf_matrix_svm$table)
+print(conf_matrix_xgb$table)
+print(conf_matrix_rf$table)
+
+
+
+
+```
+```{r}
+
+models <- list(SVM = conf_matrix_svm, XGBoost = conf_matrix_xgb, RandomForest = conf_matrix_rf)
+
+
+for (model_name in names(models)) {
+  conf_matrix_df <- as.data.frame(models[[model_name]]$table)
+  colnames(conf_matrix_df) <- c("Actual", "Predicted", "Count")
+  
+ p<- ggplot(conf_matrix_df, aes(x = Predicted, y = Actual, fill = Count)) +
+    geom_tile() +
+    geom_text(aes(label = Count), color = "black", size = 10) +
+    scale_fill_gradient(low = "white", high = yellow) +
+    labs( x = "Predicted", y = "Actual") +
+    theme_minimal()+
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+        panel.grid = element_blank(),
+        axis.text.y = element_text(size = 10))
+ print(p)
+ ggsave(filename = paste0("/Users/zheguan/DDA/Datamining/assignment4/Plots/conf_",model_name,".png"),plot = p,width = 10, height = 10, dpi = 500)
+ 
+}
+
+```
+
+
+
+```{r}
+
+
+metrics_wide <- metrics_long %>%
+  spread(key = variable, value = value) %>%
+  as_tibble()
+
+
+print(metrics_wide)
+
+
+```

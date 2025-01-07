@@ -1,0 +1,10 @@
+name: citation-prediction
+title:
+username: yhj0vi-zhe-guan
+account: yhj0vi-zhe-guan
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13671436
+bundleId: 9612777
+url: https://yhj0vi-zhe-guan.shinyapps.io/citation-prediction/
+version: 1

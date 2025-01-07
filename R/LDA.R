@@ -80,12 +80,57 @@ plot_topic_terms <- function(lda_model, group_name, k_value) {
   # 绘制条形图
   ggplot(top_terms, aes(term, beta, fill = factor(topic))) +
     geom_col(show.legend = FALSE) +
-    facet_wrap(~ topic, scales = "free", ncol = 4) +
+    facet_wrap(~ topic, scales = "free", ncol = 2) +
     coord_flip() +
     labs(
-      title = paste("Top 10 Terms in Each Topic (Group:", group_name, ", k =", k_value, ")"),
+      #title = paste("Top 10 Terms in Each Topic (Group:", group_name, ", k =", k_value, ")"),
       x = "Terms", y = "Beta"
     ) +
     scale_x_reordered() +
-    theme_minimal()
+    theme_minimal()+
+    theme(panel.grid = element_blank())
 }
+
+# 加载必要的包
+library(tidytext)
+library(ggplot2)
+library(ggraph)
+library(igraph)
+library(dplyr)
+
+plot_topic_network <- function(lda_model) {
+  # 转换模型结果为数据框
+  topic_terms <- tidy(lda_model, matrix = "beta")
+  
+  # 获取每个主题的前 10 个词
+  top_terms <- topic_terms %>%
+    group_by(topic) %>%
+    slice_max(beta, n = 10) %>%
+    ungroup()
+  
+  # 创建边列表
+  edges <- top_terms %>%
+    select(topic, term) %>%
+    rename(from = topic, to = term)
+  
+  # 创建图形对象
+  g <- graph_from_data_frame(edges, directed = TRUE)
+  
+  # 绘制网络图
+  ggraph(g, layout = "fr") +
+    geom_edge_link(color = "gray") +
+    geom_node_point(aes(color = ifelse(name %in% edges$to, "Top Term", "Topic")), size = 5) +
+    geom_node_text(aes(label = name), repel = TRUE, size = 2) +
+    theme_void() +
+    labs(
+      title = "",
+      color = "Node Type"
+    ) +
+    theme(
+      legend.position = "bottom",
+      legend.title = element_text(size = 12),
+      legend.text = element_text(size = 12),
+      panel.grid = element_blank()
+    )
+  
+} 
