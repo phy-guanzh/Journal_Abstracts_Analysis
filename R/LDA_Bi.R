@@ -66,7 +66,7 @@ LDA_analysis_bi_journal <- function(groups, journal_data, k_values){
       
       
       perplexity_score <- perplexity(lda_model, dtm)
-      
+    
       
       lda_evaluation[[paste0("Group_", paste(group, collapse = "_"), "_K_", k)]] <- list(
         group = group,
@@ -78,3 +78,4 @@ LDA_analysis_bi_journal <- function(groups, journal_data, k_values){
   }
   return(lda_evaluation)
 }
+

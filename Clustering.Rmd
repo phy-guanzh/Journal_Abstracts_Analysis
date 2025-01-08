@@ -201,7 +201,7 @@ kmeans_result <- kmeans(numeric_data, centers = 3)
 ```
 ```{r}
 table(kmeans_result$cluster,journal_data$journal)
-saveRDS(kmeans_result, "kmeans_model.rds")
+saveRDS(kmeans_result, "/Users/zheguan/DDA/Datamining/assignment4/kmeans_model.rds")
 ```
 
 ```{r}
@@ -295,7 +295,6 @@ HighFre_label <- tokenized_bigrams %>%
     HS = max(HS),
     .groups = "drop"
   )
-
 ```
 
 ```{r}
@@ -314,5 +313,216 @@ final_data
 ```{r}
 write.csv(combined_bigrams_percentage, "/Users/zheguan/DDA/Datamining/assignment4/R/top_words.csv", row.names = FALSE)
 write.csv(final_data, "/Users/zheguan/DDA/Datamining/assignment4/R/classification_data.csv", row.names = FALSE)
+write.csv(numeric_data, "/Users/zheguan/DDA/Datamining/assignment4/R/clustering_data.csv", row.names = FALSE)
+```
+
+
+```{r}
+library(reticulate)
+joblib <- import("joblib")
+model <- joblib$load("/Users/zheguan/DDA/Datamining/assignment4/R/hdbscan_model.pkl")
+model2 <- pca_model <- readRDS("/Users/zheguan/DDA/Datamining/assignment4/kmeans_model.rds")
+print(model2)
+```
+
+#TEST before dashboard
+
+
+```{r}
+input_journal_name <- "Journal of Simulation"
+input_pages <- "16"
+input_author_count <-"3"
+input_abstract <- "Productivity growth of institutions of higher education is of interest for two main reasons: education is an important factor for productivity growth of the economy, and in countries where higher education is funded by the public sector, accountability of resource use is of key interest. Educational services consist of teaching, research and the “third mission” of dissemination of knowledge to the society at large. A bootstrapped Malmquist productivity change index is used to calculate productivity development for Norwegian institutions of higher education over the 10-year period 2004–2013. The confidence intervals from bootstrapping allow part of the uncertainty of point estimates stemming from sample variation to be revealed. The main result is that the majority of institutions have had a positive productivity growth over the total period. However, when comparing with growth in labour input, the impact on productivity varies a lot."
+input_year <-"2017"
+input_title <- "Journal of Simulation"
+```
+
+```{r}
+input_title_abstract <- paste0(input_title, " - ", input_abstract)
+input_title_abstract <- lemmatize_strings(input_title_abstract)
+input_title_abstract
+input_token <- tibble(
+  row_id = 1, 
+  title_abstract = input_title_abstract,
+  year = input_year,
+  journal = input_journal_name
+)  %>%
+  unnest_tokens(output = word, input = title_abstract, token = "ngrams", n = 2) %>% 
+  separate(word, into = c("word1", "word2"), sep = " ") %>%  
+  filter(!word1 %in% stop_words$word, !word2 %in% stop_words$word) %>% 
+  filter(!grepl("\\b\\d+\\b", word1), !grepl("\\b\\d+\\b", word2)) %>% 
+  unite("bigram", word1, word2, sep = "-")
+print(input_token)
+ 
+```
+```{r}
+library(data.table)
+input_token
+input_token_dt <- as.data.table(input_token)
+input_token_dt <- input_token_dt[, .(text = paste(bigram, collapse = " ")), by = row_id]
+input_token_dt |> as.data.frame()
+```
+
+```{r}
+
+processed_new_doc <- textProcessor(
+  documents = input_token_dt$text,
+  metadata = data.frame(year = input_year, journal = input_journal_name),
+  customstopwords = NULL
+)
+
+prep_new <- prepDocuments(processed_new_doc$documents, processed_new_doc$vocab, processed_new_doc$meta, lower.thresh = 1)
+docs_new <- processed_new_doc$documents
+vocab_new <- processed_new_doc$vocab
+meta_new <- processed_new_doc$meta
+
+
+aligned_new_doc <- alignCorpus(
+  old.vocab = dtm_model$vocab,
+  new = processed_new_doc
+)
+
+
+
+```
+
+
+```{r}
+new_doc_theta <- fitNewDocuments(
+  model = dtm_model,
+  documents = aligned_new_doc$documents
+)$theta
+
+new_doc_theta
+```
+
+
+```{r}
+journal_token_bi <- tibble(row_id = 1, title_abstract = input_title_abstract) %>% 
+      select(row_id,title_abstract) %>% 
+      unnest_tokens(output = bigrams, title_abstract, token = "ngrams", n = 2) %>% 
+      filter(!grepl("\\b\\d+\\b", bigrams)) %>% 
+      separate(bigrams, into = c("word1", "word2"), sep = " ")   %>% 
+      filter(!(word1 %in% stop_words$word) & !(word2 %in% stop_words$word)) %>% unite(bigrams, word1, word2, sep = " ")
+    
+dtm <- journal_token_bi %>%
+  count(row_id, bigrams) %>%
+  cast_dtm(document = row_id, term = bigrams, value = n)
+
+topic_probabilities_lda <- posterior(lda_model, dtm)
+```
+
+```{r}
+input_data <- data.frame(
+      year = input_year,
+      pages = input_pages,
+      author_count = input_author_count,
+      Topic_STM_1 = new_doc_theta[1],
+      Topic_STM_2 = new_doc_theta[2],
+      Topic_STM_3 = new_doc_theta[3],
+      Topic_STM_4 = new_doc_theta[4],
+      Topic_STM_5 = new_doc_theta[5],
+      Topic_STM_6 = new_doc_theta[6],
+      Topic_STM_7 = new_doc_theta[7],
+      Topic_STM_8 = new_doc_theta[8],
+      Topic_STM_9 = new_doc_theta[9],
+      Topic_STM_10 = new_doc_theta[10],
+      Topic_LDA_1 = topic_probabilities_lda$topics[1],
+      Topic_LDA_2 = topic_probabilities_lda$topics[2],
+      Topic_LDA_3 = topic_probabilities_lda$topics[3],
+      Topic_LDA_4 = topic_probabilities_lda$topics[4],
+      Topic_LDA_5 = topic_probabilities_lda$topics[5],
+      Topic_LDA_6 = topic_probabilities_lda$topics[6],
+      Topic_LDA_7 = topic_probabilities_lda$topics[7],
+      Topic_LDA_8 = topic_probabilities_lda$topics[8],
+      Topic_LDA_9 = topic_probabilities_lda$topics[9],
+      Topic_LDA_10 = topic_probabilities_lda$topics[10]
+    )
+```
+
+```{r}
+input_data
+numeric_data
+
+numeric_data_add <- rbind(input_data, numeric_data %>% select(-cluster))
+numeric_data_add
+```
+
+```{r}
+model$fit(numeric_data_add)
+```
+
+```{r}
+prediction <- model$fit_predict(numeric_data_add)
+user_cluster <- tail(prediction, n = 1)
+input_data <- input_data %>% mutate(cluster = user_cluster)
+```
+
+```{r}
+
+kmeans(rbind(numeric_data, input_data), centers = 3)$cluster %>% tail(n = 1)
+input_data
+class_data <- input_data %>% select(-cluster) %>%   mutate(cluster = kmeans(rbind(numeric_data, input_data), centers = 3)$cluster %>% tail(n = 1)) 
+set.seed(42)
+input_data %>%   mutate(cluster = kmeans(rbind(numeric_data, input_data), centers = 3)$cluster %>% tail(n = 1)) 
+```
+
+```{r}
+combined_bigrams_percentage <- read.csv("/Users/zheguan/DDA/Datamining/assignment4/R/top_words.csv")
+
+bigrams_JoS <- combined_bigrams_percentage %>% 
+  filter(journal == "Journal of Simulation") %>% 
+  pull(bigram)
+
+bigrams_JoORS <- combined_bigrams_percentage %>% 
+  filter(journal == "Journal of the Operational Research Society") %>% 
+  pull(bigram)
+
+bigrams_HS <- combined_bigrams_percentage %>% 
+  filter(journal == "Health Systems") %>% 
+  pull(bigram)
+```
+
+```{r}
+HighFre_label <- input_token %>%
+  mutate(bigram = gsub("-", " ", bigram)) %>%
+  mutate(
+    HighFre_JoS = ifelse(bigram %in% bigrams_JoS & journal == "Journal of Simulation", 1, 0),
+    HighFre_JoORS = ifelse(bigram %in% bigrams_JoORS & journal == "Journal of the Operational Research Society", 1, 0),
+    HS = ifelse(bigram %in% bigrams_HS & journal == "Health Systems", 1, 0)) %>%
+    group_by(row_id, journal)  %>%
+  summarise(
+    HighFre_JoS = max(HighFre_JoS),
+    HighFre_JoORS = max(HighFre_JoORS),
+    HS = max(HS),
+    .groups = "drop"
+  )
+HighFre_label
+
+class_data <- class_data %>% cbind(HighFre_label) %>% select(-journal)
+```
+
+
+```{r}
+xgb_class_model <- readRDS("/Users/zheguan/DDA/Datamining/assignment4/classification_model/xgb_model.rds")
+```
+
+```{r}
+xgb_class_model$feature_names
+xgb_class_model$feature_names
+
+d_input <- xgb.DMatrix(data = class_data[,xgb_class_model$feature_names] %>% mutate(across(everything(), as.numeric)) %>% as.matrix())
+ 
+xgb_input_pred <- predict(xgb_model, d_input)
+
+xgb_input_pred <- factor(xgb_input_pred, levels = 0:2, labels = c("Health Systems", "Journal of Simulation", "Journal of the Operational Research Society"))
+levels(c("Health Systems", "Journal of Simulation", "Journal of the Operational Research Society"))
+```
+```{r}
+rf_class_model <- readRDS("/Users/zheguan/DDA/Datamining/assignment4/classification_model/rf_model.rds")
+```
+```{r}
+predict(rf_class_model, class_data)
+print(xgb_input_pred[1])
 ```
 

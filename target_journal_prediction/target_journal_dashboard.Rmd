@@ -1,16 +1,18 @@
 ---
 title: "Target_journal_dashboard"
 output: flexdashboard::flex_dashboard
-runtime: shiny
 resource_files:
 - journal_plots/JSM.png
 - journal_plots/HS.png
 - journal_plots/JOR.png
 - data/classification_data.csv
+- requirements.txt
+keep_tex: true
+runtime: shiny
 ---
 
 
-```{r}
+```{r, message=FALSE}
 library(shiny)
 library(tidyr)
 library(dplyr)
@@ -28,8 +30,31 @@ library(xgboost)
 library(reticulate)
 library(randomForest)
 
-joblib <- import("joblib")
+#use_virtualenv("/Users/zheguan/DDA/Datamining/assignment4/target_journal_prediction/.venv", required = TRUE)
 
+#invisible(capture.output(reticulate::py_config()))
+virtualenv_dir <- "~/.virtualenvs/r-reticulate"
+capture.output({
+if (!virtualenv_exists(virtualenv_dir)) {
+  virtualenv_create(virtualenv_dir)
+}
+reticulate::use_virtualenv(virtualenv_dir, required = TRUE)
+#virtualenv_install(virtualenv_dir, packages = "requirements.txt", ignore_installed = TRUE)
+requirements <- readLines("requirements.txt")
+
+packages <- gsub("==.*", "", requirements)
+
+virtualenv_install(virtualenv_dir, packages = packages, ignore_installed = TRUE)
+
+
+
+ # py_install("joblib", quiet = TRUE)
+ # py_install("hdbscan", quiet = TRUE)
+}, file = "/dev/null")
+
+
+joblib <- import("joblib")
+hdbscan <- import("hdbscan")
 
 prepare_input_data <- function(input_data, model_features) {
 
@@ -37,8 +62,10 @@ prepare_input_data <- function(input_data, model_features) {
   return(input_data)
 }
 
+#reticulate::py_config()
+
 model <- joblib$load("./classification_model/hdbscan_model.pkl")
-model2 <- pca_model <- readRDS("./classification_model/kmeans_model.rds")
+model2 <-  readRDS("./classification_model/kmeans_model.rds")
 
 dtm_model <- readRDS("./classification_model/dtm_model.rds")
 lda_model <- readRDS("./classification_model/lda_model_2000_2022_k10.rds")
@@ -49,32 +76,40 @@ combined_bigrams_percentage <- read_csv("./data/top_words.csv")
 xgb_class_model <- readRDS("./classification_model/xgb_model.rds")
 rf_class_model <- readRDS("./classification_model/rf_model.rds")
 
+library(shiny)
+
 ui <- fluidPage(
   titlePanel("Target Journal Prediction"),
-  sidebarLayout(
-    sidebarPanel(
-      numericInput("year", "Year of Publication:", 2023),
-      numericInput("pages", "Number of Pages:", 10),
-      numericInput("author_count", "Number of Authors:", 3),
-      textAreaInput("title", "Title:",  rows = 2, value = "Efficiency ranking of decision making units in data envelopment analysis by using TOPSIS-DEA method"),
-      textAreaInput("abstract", "Abstract:",  rows = 6, value = "Productivity growth of institutions of higher education is of interest for two main reasons: education is an important factor for productivity growth of the economy, and in countries where higher education is funded by the public sector, accountability of resource use is of key interest. Educational services consist of teaching, research and the “third mission” of dissemination of knowledge to the society at large. A bootstrapped Malmquist productivity change index is used to calculate productivity development for Norwegian institutions of higher education over the 10-year period 2004–2013. The confidence intervals from bootstrapping allow part of the uncertainty of point estimates stemming from sample variation to be revealed. The main result is that the majority of institutions have had a positive productivity growth over the total period. However, when comparing with growth in labour input, the impact on productivity varies a lot."),
+  div(
+    style = "height: 90vh; overflow-y: auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
+    
+
+    sidebarLayout(
+      sidebarPanel(
+        numericInput("year", "Year of Publication:", 2023),
+        numericInput("pages", "Number of Pages:", 10),
+        numericInput("author_count", "Number of Authors:", 3),
+        textAreaInput("title", "Title:", rows = 2, value = "Efficiency ranking of decision making units in data envelopment analysis by using TOPSIS-DEA method"),
+        textAreaInput("abstract", "Abstract:", rows = 6, value = "Productivity growth of institutions of higher education is of interest for two main reasons: education is an important factor for productivity growth of the economy, and in countries where higher education is funded by the public sector, accountability of resource use is of key interest. Educational services consist of teaching, research and the “third mission” of dissemination of knowledge to the society at large. A bootstrapped Malmquist productivity change index is used to calculate productivity development for Norwegian institutions of higher education over the 10-year period 2004–2013. The confidence intervals from bootstrapping allow part of the uncertainty of point estimates stemming from sample variation to be revealed. The main result is that the majority of institutions have had a positive productivity growth over the total period. However, when comparing with growth in labour input, the impact on productivity varies a lot."),
+        actionButton("predict", "Predict")
+      ),
       
-      
-      actionButton("predict", "Predict")
-    ),
-    mainPanel(
-      uiOutput("title"),
-      uiOutput("lda_terms"),
-      uiOutput("stm_terms"),
-      uiOutput("rf_output"),
-      uiOutput("xgb_output"),
-      imageOutput("my_image", width = "400px", height = "200px"),
-      uiOutput("note"),
-      uiOutput("link"),
-      uiOutput("text")
+      mainPanel(
+        uiOutput("title"),
+        uiOutput("lda_terms"),
+        uiOutput("stm_terms"),
+        uiOutput("rf_output"),
+        uiOutput("xgb_output"),
+        imageOutput("my_image", width = "400px", height = "200px"),
+        uiOutput("note"),
+        uiOutput("link"),
+        uiOutput("text")
+      )
     )
   ),
-    div(
+  
+  div(
+    class = "footer",
     style = "text-align: center; color: gray; margin-top: 20px;",
     HTML("<p>This tool is for communication purposes only. Please do not use it for commercial purposes without the author's consent.</p>")
   )
@@ -98,7 +133,7 @@ server <- function(input, output) {
       filter(!word1 %in% stop_words$word, !word2 %in% stop_words$word) %>% 
       filter(!grepl("\\b\\d+\\b", word1), !grepl("\\b\\d+\\b", word2)) %>% 
       unite("bigram", word1, word2, sep = "-")
-    
+      print("1")
       input_token_dt <- as.data.table(input_token)
       input_token_dt <- input_token_dt[, .(text = paste(bigram, collapse = " ")), by = row_id]
       input_token_dt |> as.data.frame()
@@ -124,14 +159,14 @@ server <- function(input, output) {
       model = dtm_model,
       documents = aligned_new_doc$documents
     )$theta
-
+    print("2")
     journal_token_bi <- tibble(row_id = 1, title_abstract = input_title_abstract) %>% 
       select(row_id,title_abstract) %>% 
       unnest_tokens(output = bigrams, title_abstract, token = "ngrams", n = 2) %>% 
       filter(!grepl("\\b\\d+\\b", bigrams)) %>% 
       separate(bigrams, into = c("word1", "word2"), sep = " ")   %>% 
       filter(!(word1 %in% stop_words$word) & !(word2 %in% stop_words$word)) %>% unite(bigrams, word1, word2, sep = " ")
-    
+    print("3")
     dtm <- journal_token_bi %>%
       count(row_id, bigrams) %>%
       cast_dtm(document = row_id, term = bigrams, value = n)
@@ -150,7 +185,7 @@ server <- function(input, output) {
             )
           )
     })
-    
+    print("4")
     output$lda_terms <- renderUI({
      HTML(
       paste0(
@@ -163,7 +198,7 @@ server <- function(input, output) {
     })
     
     
-    
+    print("5")
     output$stm_terms <- renderUI({
      HTML(
       paste0(
@@ -201,14 +236,20 @@ server <- function(input, output) {
       Topic_LDA_9 = topic_probabilities_lda$topics[9],
       Topic_LDA_10 = topic_probabilities_lda$topics[10]
     )
-    
+    #model <- hdbscan$HDBSCAN(min_cluster_size = as.integer(20))
+     print("6")
+    print(str(numeric_data))
+    print(str(input_data))
     numeric_data_add <- rbind(input_data, numeric_data %>% select(-cluster))
     model$fit(numeric_data_add)
+    print(str(numeric_data_add))
+    print("7")
     prediction <- model$fit_predict(numeric_data_add)
+    #user_cluster <- 1
     user_cluster <- tail(prediction, n = 1)
     input_data <- input_data %>% mutate(cluster = user_cluster)
     class_data <- input_data %>% select(-cluster) %>%   mutate(cluster = kmeans(rbind(numeric_data, input_data), centers = 3)$cluster %>% tail(n = 1)) 
-    
+    print("8")
     bigrams_JoS <- combined_bigrams_percentage %>% 
       filter(journal == "Journal of Simulation") %>% 
       pull(bigram)
@@ -220,7 +261,7 @@ server <- function(input, output) {
     bigrams_HS <- combined_bigrams_percentage %>% 
       filter(journal == "Health Systems") %>% 
       pull(bigram)
-    
+     print("9")
       HighFre_label <- input_token %>%
         mutate(bigram = gsub("-", " ", bigram)) %>%
         mutate(
@@ -234,7 +275,7 @@ server <- function(input, output) {
           HS = max(HS),
           .groups = "drop"
            )
-
+        print("10")
       class_data <- class_data %>% cbind(HighFre_label)
       
       d_input <- xgb.DMatrix(data = class_data[,xgb_class_model$feature_names] %>% mutate(across(everything(), as.numeric)) %>%    as.matrix())
@@ -243,7 +284,7 @@ server <- function(input, output) {
       
       rf_input_pred <- predict(rf_class_model, class_data) %>% as.character()
       
-    
+      print("11")
       print(xgb_input_pred)
       print(rf_input_pred)
 
@@ -273,7 +314,7 @@ server <- function(input, output) {
       
     
     fig_path <- ifelse(xgb_input_pred != "Journal of the Operational Research Society", 
-                       ifelse(xgb_input_pred =="Health Systems", "HS", "JOS" ), "JOR")
+                       ifelse(xgb_input_pred =="Health Systems", "HS", "JSM" ), "JOR")
     
     print(fig_path)
     print(paste0("www/",fig_path))
@@ -298,3 +339,8 @@ server <- function(input, output) {
 shinyApp(ui = ui, server = server)
 
 ```
+
+```{r}
+packageVersion("reticulate")
+```
+

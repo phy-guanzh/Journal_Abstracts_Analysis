@@ -283,8 +283,8 @@ for (i in seq_along(plots_list_tfidf_uni_journal)) {
   ggsave(
     filename = paste0("Plots/toptfidf_uni_journal_", i, ".png"),
     plot = plots_list_tfidf_uni_journal[[i]],
-    width = 10,  # 单个图的宽度
-    height = 10, # 单个图的高度
+    width = 10,  
+    height = 10, 
     dpi = 300,
     limitsize = FALSE
   )

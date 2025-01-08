@@ -103,6 +103,9 @@ pred_lg <- predict(model_lg, test_data)
 accuracy <- sum(pred_lg == test_data$journal) / nrow(test_data)
 print(paste("Accuracy:", round(accuracy * 100, 2), "%"))
 ```
+```{r}
+saveRDS(model_lg, "/Users/zheguan/DDA/Datamining/assignment4/classification_model/model_lg.rds")
+```
 
 ```{r}
 
@@ -142,7 +145,9 @@ rf_conf_matrix <- confusionMatrix(rf_pred, test_data$journal)
 print(rf_conf_matrix)
 
 ```
-
+```{r}
+saveRDS(rf_model, "/Users/zheguan/DDA/Datamining/assignment4/classification_model/rf_model.rds")
+```
 
 #XGboost
 ```{r}
@@ -189,7 +194,9 @@ xgb_conf_matrix <- confusionMatrix(xgb_pred, test_y)
 print(xgb_conf_matrix)
 levels(test_data$journal)
 ```
-
+```{r}
+saveRDS(xgb_model, "/Users/zheguan/DDA/Datamining/assignment4/classification_model/xgb_model.rds")
+```
 #SVM model
 ```{r}
 
@@ -206,7 +213,9 @@ svm_conf_matrix <- confusionMatrix(svm_pred, test_data$journal)
 print(svm_conf_matrix)
 
 ```
-
+```{r}
+saveRDS(svm_model, "/Users/zheguan/DDA/Datamining/assignment4/classification_model/svm_model.rds")
+```
 #NN model
 ```{r}
 
@@ -250,6 +259,9 @@ conf_matrix <- confusionMatrix(nn_pred_factor, test_y_factor)
 
 
 print(conf_matrix)
+
+saveRDS(nn_model, "/Users/zheguan/DDA/Datamining/assignment4/classification_model/nn_model.rds")
+
 
 ```
 ```{r}

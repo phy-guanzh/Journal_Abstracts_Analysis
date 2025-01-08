@@ -12,10 +12,10 @@ More information can be checked in reports:
 
 ##  Quick Run on Online Dashboard
 
+1. [Predict your target journal before submission](http://yhj0vi-zhe-guan.shinyapps.io/target_journal_dashboard)
+2. [Predict your citation number](https://yhj0vi-zhe-guan.shinyapps.io/Citation_dashboard/)    
+3. [Word Clouds](http://yhj0vi-zhe-guan.shinyapps.io/Top100_Key_Words_Dashboard).
 
-1. [Word Clouds](http://yhj0vi-zhe-guan.shinyapps.io/Top100_Key_Words_Dashboard).
-2. [Predict your target journal before submission]()
-3. [Predict your citation number]()
 
 ## 📋 Repository Structure
 
@@ -51,7 +51,7 @@ The main structure is as follows:
 
 2. directory **target_journal_prediction** provides a dashboard with trained data to predict target journal
       
-####Trained models for citation regression include:
+#### Trained models for citation regression include:
 
 ```shell
     ├── models
@@ -71,7 +71,7 @@ The main structure is as follows:
  ├── classification_model   
  │   ├── dtm_model.rds      
  │   ├── dtm_model_K6.rds   
-`│   ├── hdbscan_model.pkl##``
+`│   ├── hdbscan_model.pkl
  │   ├── kmeans_model.rds   
  │   ├── lda_model_2000_2022
  │   ├── model_lg.rds        
