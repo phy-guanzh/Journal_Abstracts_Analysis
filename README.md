@@ -1,8 +1,7 @@
 # Journal Abstract Analysis
 This repository presents a framework that combines structural topic modelling (STM) and latent Dirichlet allocation (LDA), with machine learning classifiers while integrating multiple clustering algorithms, to predict both the number of citations a paper will receive and the most suitable journal for submission.
 
-![Treasure or Trash](R/flow/comic.png)   
-*Made by phy-guanzh based on Pixton app.*
+![Treasure or Trash](R/flow/comic.png)   * *made by phy-guanzh based on Pixton app.*
 
 Additionally, two interactive dashboards are provided to allow users to input paper abstracts and obtain predictions using different models.
 
