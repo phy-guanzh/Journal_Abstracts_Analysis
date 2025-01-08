@@ -1,6 +1,12 @@
 # Journal Abstract Analysis
+This repository presents a framework that combines structural topic modelling (STM) and latent Dirichlet allocation (LDA), with machine learning classifiers while integrating multiple clustering algorithms, to predict both the number of citations a paper will receive and the most suitable journal for submission.
 
-This study presents a framework that combines structural topic modelling (STM) and latent Dirichlet allocation (LDA), with machine learning classifiers while integrating multiple clustering algorithms, to predict both the number of citations a paper will receive and the most suitable journal for submission. Additionally, two interactive dashboards are provided to allow users to input paper abstracts and obtain predictions using different models.
+![Treasure or Trash](R/flow/comic.png)   
+
+
+Additionally, two interactive dashboards are provided to allow users to input paper abstracts and obtain predictions using different models.
+
+
 The work flows are shown as below:
 
 ![Work Flow](R/flow/flow.001.jpeg)
@@ -89,3 +95,11 @@ Open the `.Rmd` file in **RStudio**.
 
 Click the **"Knit"** button at the top of the RStudio interface.
 
+#### Run `.Rmd` files step by step 
+
+1. Pre_processing.Rmd
+2. Citation_Prediction.Rmd
+3. Clustering.Rmd
+4. Classification.Rmd
+
+Needed R functions are stored in the R folder

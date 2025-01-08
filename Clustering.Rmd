@@ -325,9 +325,9 @@ model2 <- pca_model <- readRDS("/Users/zheguan/DDA/Datamining/assignment4/kmeans
 print(model2)
 ```
 
-#TEST before dashboard
+#TEST before dashboard application (Please ignore this chuck before you did classification part)
 
-
+#assume we have a new input from users
 ```{r}
 input_journal_name <- "Journal of Simulation"
 input_pages <- "16"
@@ -526,3 +526,4 @@ predict(rf_class_model, class_data)
 print(xgb_input_pred[1])
 ```
 
+#We finally get the prediction results! WoW
