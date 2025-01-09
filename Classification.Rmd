@@ -22,7 +22,7 @@ blue <- c('#17becf')
 ```
 
 ```{r}
-final_data <- read.csv("/Users/zheguan/DDA/Datamining/assignment4/R/classification_data.csv")
+final_data <- read.csv("/Users/zheguan/DDA/Datamining/assignment4/target_journal_prediction/data/classification_data.csv")
 ```
 
 ```{r}
@@ -145,6 +145,27 @@ rf_conf_matrix <- confusionMatrix(rf_pred, test_data$journal)
 print(rf_conf_matrix)
 
 ```
+
+```{r}
+importance_values <- importance(rf_model)
+importance_df <- as.data.frame(importance_values)
+importance_df$Variable <- rownames(importance_df)
+
+
+importance_rf <- ggplot(importance_df, aes(x = reorder(Variable, MeanDecreaseGini), y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = green) +
+  coord_flip() +
+  theme_minimal() +
+  labs(#title = "Variable Importance (Random Forest)",
+       x = "Variables",
+       y = "Mean Decrease in Gini")+
+  theme(panel.grid = element_blank())
+
+print(importance_rf)
+
+ggsave("Plots/importance_rf.png",plot = importance_rf, width = 10, height = 10, dpi = 500)
+```
+
 ```{r}
 saveRDS(rf_model, "/Users/zheguan/DDA/Datamining/assignment4/classification_model/rf_model.rds")
 ```
@@ -193,7 +214,29 @@ test_y <- factor(test_y, levels = 0:2, labels = levels(test_data$journal))
 xgb_conf_matrix <- confusionMatrix(xgb_pred, test_y)
 print(xgb_conf_matrix)
 levels(test_data$journal)
+
+
 ```
+
+```{r}
+importance_matrix <- xgb.importance(model = xgb_model)
+importance_df <- as.data.frame(importance_matrix)
+
+importance_xgb <- ggplot(importance_df, aes(x = reorder(Feature, Gain), y = Gain)) +
+  geom_bar(stat = "identity", fill = violet2) +
+  coord_flip() +
+  theme_minimal() +
+  labs(#title = "Variable Importance (XGBoost)",
+       x = "Features",
+       y = "Gain")+
+  theme(panel.grid = element_blank())
+
+print(importance_xgb)
+
+ggsave("Plots/importance_xgb.png",plot = importance_xgb, width = 10, height = 10, dpi = 500)
+```
+
+
 ```{r}
 saveRDS(xgb_model, "/Users/zheguan/DDA/Datamining/assignment4/classification_model/xgb_model.rds")
 ```
